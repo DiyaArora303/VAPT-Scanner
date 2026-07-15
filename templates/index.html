@@ -1,0 +1,429 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>VAPT Scanner — Recon Suite</title>
+  <meta name="description" content="Professional VAPT reconnaissance suite for subdomain enumeration and sensitive directory discovery." />
+  <link rel="preconnect" href="https://fonts.googleapis.com" />
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+  <link href="https://fonts.googleapis.com/css2?family=JetBrains+Mono:wght@300;400;500;700&family=Inter:wght@300;400;500;600;700&display=swap" rel="stylesheet" />
+  <link rel="stylesheet" href="/static/css/style.css" />
+</head>
+<body>
+
+  <!-- ── BACKGROUND GRID ── -->
+  <div class="bg-grid"></div>
+  <div class="bg-glow bg-glow-1"></div>
+  <div class="bg-glow bg-glow-2"></div>
+
+  <!-- ── TOP NAV ── -->
+  <nav class="navbar" id="navbar">
+    <div class="nav-brand">
+      <span class="brand-icon">⬡</span>
+      <span class="brand-text">VAPT<span class="brand-accent">Scanner</span></span>
+      <span class="brand-tag">RECON SUITE</span>
+    </div>
+    <div class="nav-tabs">
+      <button class="nav-tab active" id="tab-subdomain" onclick="switchTab('subdomain')">
+        <span class="tab-icon">◈</span> Subdomain Finder
+      </button>
+      <button class="nav-tab" id="tab-dirscan" onclick="switchTab('dirscan')">
+        <span class="tab-icon">◉</span> Directory Scanner
+      </button>
+    </div>
+    <div class="nav-status">
+      <span class="status-dot" id="server-dot"></span>
+      <span class="status-label" id="server-label">Connected</span>
+    </div>
+  </nav>
+
+  <!-- ── MAIN CONTENT ── -->
+  <main class="main-content">
+
+    <!-- ══════════════════════════════════ -->
+    <!--  MODULE 1 — SUBDOMAIN FINDER       -->
+    <!-- ══════════════════════════════════ -->
+    <section class="module" id="module-subdomain">
+
+      <div class="module-header">
+        <div class="module-title-group">
+          <h1 class="module-title">Subdomain Enumeration</h1>
+          <p class="module-subtitle">Passive recon using Subfinder · Assetfinder · Amass · Chaos · CertSpotter · Anubis</p>
+        </div>
+        <div class="module-badge" id="sub-badge">READY</div>
+      </div>
+
+      <!-- Input card -->
+      <div class="card input-card">
+        <label class="input-label" for="domain-input">TARGET DOMAIN</label>
+        <div class="input-row">
+          <div class="input-wrapper">
+            <span class="input-prefix">$</span>
+            <input
+              type="text"
+              id="domain-input"
+              class="domain-input"
+              placeholder="example.com"
+              autocomplete="off"
+              spellcheck="false"
+            />
+          </div>
+          <button class="btn-primary" id="start-sub-btn" onclick="startSubdomainScan()">
+            <span class="btn-icon">▶</span>
+            <span class="btn-text">Start Scan</span>
+          </button>
+          <button class="btn-stop" id="stop-sub-btn" onclick="stopScan('subdomain')" style="display:none">
+            <span class="btn-icon">■</span> Stop
+          </button>
+        </div>
+        <div class="tool-chips">
+          <span class="chip" id="chip-subfinder">subfinder</span>
+          <span class="chip" id="chip-assetfinder">assetfinder</span>
+          <span class="chip" id="chip-amass">amass</span>
+          <span class="chip" id="chip-chaos">chaos</span>
+          <span class="chip" id="chip-github">github-subs</span>
+          <span class="chip" id="chip-certspotter">certspotter</span>
+          <span class="chip" id="chip-anubis">anubis</span>
+        </div>
+      </div>
+
+      <!-- Stats row -->
+      <div class="stats-row" id="sub-stats-row" style="display:none">
+        <div class="stat-card">
+          <span class="stat-value" id="stat-total">0</span>
+          <span class="stat-label">Total Found</span>
+        </div>
+        <div class="stat-card stat-card--alive">
+          <span class="stat-value" id="stat-alive">0</span>
+          <span class="stat-label">Alive Hosts</span>
+        </div>
+        <div class="stat-card">
+          <span class="stat-value" id="stat-elapsed">0s</span>
+          <span class="stat-label">Elapsed</span>
+        </div>
+      </div>
+
+      <!-- Terminal -->
+      <div class="card terminal-card" id="sub-terminal-card" style="display:none">
+        <div class="terminal-header">
+          <div class="terminal-dots">
+            <span class="dot dot-red"></span>
+            <span class="dot dot-yellow"></span>
+            <span class="dot dot-green"></span>
+          </div>
+          <span class="terminal-title" id="sub-terminal-title">bash — subdomain_finder.sh</span>
+          <button class="btn-icon-only" onclick="clearTerminal('sub-terminal')" title="Clear">⌫</button>
+        </div>
+        <div class="terminal-body" id="sub-terminal"></div>
+      </div>
+
+      <!-- Results -->
+      <div class="card results-card" id="sub-results-card" style="display:none">
+        <div class="results-header">
+          <h2 class="results-title">Discovered Subdomains</h2>
+          <div class="results-actions">
+            <button class="btn-secondary" id="btn-dl-all-subs" onclick="downloadFile('all')">
+              ↓ All Subdomains
+            </button>
+            <button class="btn-secondary btn-secondary--green" id="btn-dl-alive-subs" onclick="downloadFile('alive')">
+              ↓ Alive Domains
+            </button>
+            <button class="btn-primary btn-primary--small" id="btn-run-dirscan" onclick="passToDirectoryScanner()">
+              ◉ Run Dir Scan →
+            </button>
+          </div>
+        </div>
+
+        <div class="tabs-inner">
+          <button class="inner-tab active" id="itab-alive" onclick="showResultTab('alive')">
+            Alive <span class="tab-count" id="alive-count-badge">0</span>
+          </button>
+          <button class="inner-tab" id="itab-all" onclick="showResultTab('all')">
+            All Subdomains <span class="tab-count" id="all-count-badge">0</span>
+          </button>
+        </div>
+
+        <div id="results-table-container">
+          <table class="results-table" id="results-table">
+            <thead>
+              <tr>
+                <th>#</th>
+                <th>Host / URL</th>
+                <th>Status</th>
+                <th>Action</th>
+              </tr>
+            </thead>
+            <tbody id="results-tbody"></tbody>
+          </table>
+        </div>
+      </div>
+
+    </section>
+
+    <!-- ══════════════════════════════════════════════ -->
+    <!--  MODULE 2 — DIRECTORY SCANNER (two sub-tabs) -->
+    <!-- ══════════════════════════════════════════════ -->
+    <section class="module hidden" id="module-dirscan">
+
+      <div class="module-header">
+        <div class="module-title-group">
+          <h1 class="module-title">Directory Scanner</h1>
+          <p class="module-subtitle">Two scan modes: Sensitive File Exposure · Common Directory Enumeration</p>
+        </div>
+        <div class="module-badge module-badge--orange" id="dir-badge">READY</div>
+      </div>
+
+      <!-- ── SUB-TAB SWITCHER ── -->
+      <div class="dir-subtab-bar">
+        <button class="dir-subtab active" id="dsubtab-sensitive" onclick="switchDirSubTab('sensitive')">
+          <span>🔐</span> Sensitive File Scan
+        </button>
+        <button class="dir-subtab" id="dsubtab-common" onclick="switchDirSubTab('common')">
+          <span>📂</span> Common Directory Scan
+          <span class="subtab-tag">4750 paths</span>
+        </button>
+      </div>
+
+      <!-- ════════════════════════════════════ -->
+      <!--  SUB-TAB A — SENSITIVE FILE SCAN    -->
+      <!-- ════════════════════════════════════ -->
+      <div id="dirpanel-sensitive">
+
+        <!-- Input card -->
+        <div class="card input-card">
+          <div class="file-source-row">
+            <div class="file-source-option active" id="src-from-scan" onclick="selectFileSource('scan')">
+              <span class="source-icon">⟳</span>
+              <span>From Last Subdomain Scan</span>
+            </div>
+            <div class="file-source-option" id="src-custom" onclick="selectFileSource('custom')">
+              <span class="source-icon">📁</span>
+              <span>Custom File Path</span>
+            </div>
+          </div>
+
+          <div id="src-scan-panel">
+            <div class="alive-file-display" id="alive-file-display">
+              <span class="alive-file-icon">📄</span>
+              <span class="alive-file-path" id="alive-file-path-display">No subdomain scan completed yet</span>
+            </div>
+          </div>
+
+          <div id="src-custom-panel" style="display:none">
+            <label class="input-label" for="custom-alive-path">ALIVE DOMAINS FILE PATH</label>
+            <div class="input-row">
+              <div class="input-wrapper" style="flex:1">
+                <span class="input-prefix">📄</span>
+                <input type="text" id="custom-alive-path" class="domain-input"
+                  placeholder="/path/to/alive_subdomains.txt" spellcheck="false" />
+              </div>
+            </div>
+          </div>
+
+          <div style="margin-top:1.2rem">
+            <label class="input-label" for="dir-domain-label">SCAN LABEL (optional)</label>
+            <div class="input-row">
+              <div class="input-wrapper" style="flex:1">
+                <span class="input-prefix">@</span>
+                <input type="text" id="dir-domain-label" class="domain-input"
+                  placeholder="e.g. example.com" spellcheck="false" />
+              </div>
+              <button class="btn-primary btn-primary--orange" id="start-dir-btn" onclick="startDirScan()">
+                <span class="btn-icon">▶</span>
+                <span class="btn-text">Start Sensitive Scan</span>
+              </button>
+              <button class="btn-stop" id="stop-dir-btn" onclick="stopScan('dirscan')" style="display:none">
+                <span class="btn-icon">■</span> Stop
+              </button>
+            </div>
+          </div>
+
+          <div class="target-chips-label">SENSITIVE PATHS CHECKED:</div>
+          <div class="tool-chips">
+            <span class="chip chip--path">/.env</span>
+            <span class="chip chip--path">/.git/HEAD</span>
+            <span class="chip chip--path">/.svn/entries</span>
+            <span class="chip chip--path">/composer.json</span>
+            <span class="chip chip--path">/package.json</span>
+            <span class="chip chip--path">/config.php</span>
+            <span class="chip chip--path">/wp-config.php</span>
+          </div>
+        </div>
+
+        <div class="stats-row" id="dir-stats-row" style="display:none">
+          <div class="stat-card">
+            <span class="stat-value" id="dir-stat-scanned">0</span>
+            <span class="stat-label">Hosts Audited</span>
+          </div>
+          <div class="stat-card stat-card--red">
+            <span class="stat-value" id="dir-stat-found">0</span>
+            <span class="stat-label">Exposures Found</span>
+          </div>
+          <div class="stat-card">
+            <span class="stat-value" id="dir-stat-elapsed">0s</span>
+            <span class="stat-label">Elapsed</span>
+          </div>
+        </div>
+
+        <div class="card terminal-card" id="dir-terminal-card" style="display:none">
+          <div class="terminal-header">
+            <div class="terminal-dots">
+              <span class="dot dot-red"></span><span class="dot dot-yellow"></span><span class="dot dot-green"></span>
+            </div>
+            <span class="terminal-title" id="dir-terminal-title">bash — dir_search.sh</span>
+            <button class="btn-icon-only" onclick="clearTerminal('dir-terminal')" title="Clear">⌫</button>
+          </div>
+          <div class="terminal-body" id="dir-terminal"></div>
+        </div>
+
+        <div class="card results-card" id="dir-results-card" style="display:none">
+          <div class="results-header">
+            <h2 class="results-title">Verified Exposures</h2>
+            <div class="results-actions">
+              <button class="btn-secondary btn-secondary--red" id="btn-dl-findings" onclick="downloadDirFindings()">
+                ↓ Download Report
+              </button>
+            </div>
+          </div>
+          <div id="findings-container">
+            <table class="results-table" id="findings-table">
+              <thead><tr><th>#</th><th>Exposed URL</th><th>Type</th><th>Action</th></tr></thead>
+              <tbody id="findings-tbody"></tbody>
+            </table>
+            <div class="no-findings" id="no-findings-msg" style="display:none">
+              <span class="no-findings-icon">✓</span>
+              <span>No verified exposures found — target appears clean.</span>
+            </div>
+          </div>
+        </div>
+
+      </div><!-- /dirpanel-sensitive -->
+
+      <!-- ════════════════════════════════════ -->
+      <!--  SUB-TAB B — COMMON DIRECTORY SCAN  -->
+      <!-- ════════════════════════════════════ -->
+      <div id="dirpanel-common" style="display:none">
+
+        <div class="card input-card">
+          <label class="input-label" for="common-target-url">TARGET URL</label>
+          <div class="input-row">
+            <div class="input-wrapper" style="flex:1">
+              <span class="input-prefix" style="color:var(--cyan)">🌐</span>
+              <input
+                type="text"
+                id="common-target-url"
+                class="domain-input"
+                placeholder="https://example.com"
+                autocomplete="off"
+                spellcheck="false"
+              />
+            </div>
+            <button class="btn-primary" id="start-common-btn" onclick="startCommonDirScan()"
+              style="background:linear-gradient(135deg,#00d4ff,#0090b3);box-shadow:0 4px 15px rgba(0,212,255,0.25)">
+              <span class="btn-icon">▶</span>
+              <span class="btn-text">Start Common Scan</span>
+            </button>
+            <button class="btn-stop" id="stop-common-btn" onclick="stopScan('commondir')" style="display:none">
+              <span class="btn-icon">■</span> Stop
+            </button>
+          </div>
+
+          <div class="target-chips-label">WORDLIST: common.txt (4750 entries)</div>
+          <div class="tool-chips">
+            <span class="chip" style="color:var(--cyan);border-color:rgba(0,212,255,0.3)">/admin</span>
+            <span class="chip" style="color:var(--cyan);border-color:rgba(0,212,255,0.3)">/login</span>
+            <span class="chip" style="color:var(--cyan);border-color:rgba(0,212,255,0.3)">/api</span>
+            <span class="chip" style="color:var(--cyan);border-color:rgba(0,212,255,0.3)">/backup</span>
+            <span class="chip" style="color:var(--cyan);border-color:rgba(0,212,255,0.3)">/config</span>
+            <span class="chip" style="color:var(--cyan);border-color:rgba(0,212,255,0.3)">/dashboard</span>
+            <span class="chip" style="color:var(--cyan);border-color:rgba(0,212,255,0.3)">+4744 more</span>
+          </div>
+        </div>
+
+        <!-- Common scan stats -->
+        <div class="stats-row" id="common-stats-row" style="display:none">
+          <div class="stat-card">
+            <span class="stat-value" id="common-stat-scanned">0</span>
+            <span class="stat-label">Hosts Scanned</span>
+          </div>
+          <div class="stat-card" style="border-color:rgba(0,212,255,0.25);background:rgba(0,212,255,0.04)">
+            <span class="stat-value" id="common-stat-found" style="color:var(--cyan)">0</span>
+            <span class="stat-label">Paths Found</span>
+          </div>
+          <div class="stat-card">
+            <span class="stat-value" id="common-stat-elapsed">0s</span>
+            <span class="stat-label">Elapsed</span>
+          </div>
+        </div>
+
+        <!-- Common terminal -->
+        <div class="card terminal-card" id="common-terminal-card" style="display:none">
+          <div class="terminal-header">
+            <div class="terminal-dots">
+              <span class="dot dot-red"></span><span class="dot dot-yellow"></span><span class="dot dot-green"></span>
+            </div>
+            <span class="terminal-title" id="common-terminal-title">bash — common_dir_scan.sh</span>
+            <button class="btn-icon-only" onclick="clearTerminal('common-terminal')" title="Clear">⌫</button>
+          </div>
+          <div class="terminal-body" id="common-terminal"></div>
+        </div>
+
+        <!-- Common results -->
+        <div class="card results-card" id="common-results-card" style="display:none">
+          <div class="results-header">
+            <h2 class="results-title">Common Directories Found</h2>
+            <div class="results-actions">
+              <button class="btn-secondary" id="btn-dl-common"
+                style="color:var(--cyan);border-color:rgba(0,212,255,0.3)"
+                onclick="downloadCommonFindings()">
+                ↓ Download Report
+              </button>
+            </div>
+          </div>
+          <div id="common-findings-container">
+            <table class="results-table" id="common-findings-table">
+              <thead>
+                <tr>
+                  <th>#</th>
+                  <th>URL</th>
+                  <th>HTTP Code</th>
+                  <th>Action</th>
+                </tr>
+              </thead>
+              <tbody id="common-findings-tbody"></tbody>
+            </table>
+            <div class="no-findings" id="common-no-findings-msg" style="display:none">
+              <span class="no-findings-icon">✓</span>
+              <span>No common directories found.</span>
+            </div>
+          </div>
+        </div>
+
+      </div><!-- /dirpanel-common -->
+
+    </section>
+
+  </main>
+
+  <!-- ── SESSION HISTORY SIDEBAR TOGGLE ── -->
+  <button class="history-toggle" id="history-toggle" onclick="toggleHistory()">
+    ◧ Sessions
+  </button>
+
+  <aside class="history-panel" id="history-panel">
+    <div class="history-header">
+      <span>Scan History</span>
+      <button class="btn-icon-only" onclick="toggleHistory()">✕</button>
+    </div>
+    <div class="history-list" id="history-list">
+      <div class="history-empty">No scans yet</div>
+    </div>
+  </aside>
+
+  <!-- ── TOAST NOTIFICATIONS ── -->
+  <div class="toast-container" id="toast-container"></div>
+
+  <script src="/static/js/app.js"></script>
+</body>
+</html>
