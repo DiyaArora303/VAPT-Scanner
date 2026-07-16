@@ -494,19 +494,48 @@ function refreshHistory() {
           ? `Alive: ${s.result_summary?.alive_count ?? '—'}`
           : `Findings: ${s.result_summary?.total_findings ?? '—'}`;
         const statusColor = s.status === 'completed' ? 'var(--green)' : s.status === 'failed' ? 'var(--red)' : 'var(--cyan)';
-        const canLoad = s.status === 'completed';
-        return `<div class="history-item${canLoad ? ' history-item--clickable' : ''}" ${canLoad ? `onclick="loadHistoryItem('${s.id}','${s.type}')"` : ''}>
+        const canLoad    = s.status === 'completed';
+        const canJump    = s.status === 'running';
+        const isClickable = canLoad || canJump;
+
+        const ctaText = canLoad ? 'Click to view results →'
+                      : canJump ? 'Click to view live scan →'
+                      : '';
+
+        const onclickAttr = canLoad ? `onclick="loadHistoryItem('${s.id}','${s.type}')"` 
+                          : canJump ? `onclick="jumpToRunning('${s.type}')"`
+                          : '';
+
+        return `<div class="history-item${isClickable ? ' history-item--clickable' : ''}" ${onclickAttr}>
           <div class="history-item-top">
-            <div class="history-item-type">${s.type === 'subdomain' ? '◈ SUBDOMAIN' : '◉ DIR SCAN'}</div>
+            <div class="history-item-type">${s.type === 'subdomain' ? '◈ SUBDOMAIN' : s.type === 'commondir' ? '◈ COMMON DIR' : '◉ DIR SCAN'}</div>
             <div class="history-item-status" style="color:${statusColor}">${s.status.toUpperCase()}</div>
           </div>
           <div class="history-item-domain">${s.domain}</div>
           <div class="history-item-meta">${meta} · ${dt}</div>
-          ${canLoad ? '<div class="history-item-cta">Click to view results →</div>' : ''}
+          ${isClickable ? `<div class="history-item-cta">${ctaText}</div>` : ''}
         </div>`;
+
       }).join('');
     })
     .catch(() => {});
+}
+
+// ─── Jump to a currently-running scan ────────────────────
+function jumpToRunning(type) {
+  if (type === 'subdomain') {
+    switchTab('subdomain');
+    document.getElementById('sub-terminal-card').style.display = 'block';
+  } else if (type === 'dirscan') {
+    switchTab('dirscan');
+    switchDirSubTab('sensitive');
+    document.getElementById('dir-terminal-card').style.display = 'block';
+  } else if (type === 'commondir') {
+    switchTab('dirscan');
+    switchDirSubTab('common');
+    document.getElementById('common-terminal-card').style.display = 'block';
+  }
+  document.getElementById('history-panel').classList.remove('open');
 }
 
 // ─── Load history item into UI ───────────────────────────

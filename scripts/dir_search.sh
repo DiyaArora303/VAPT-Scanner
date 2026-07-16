@@ -18,6 +18,10 @@ SENSITIVE_PATHS=(
     "/wp-config.php"
 )
 
+# Single temp file reused for all curl body reads — cleaned up automatically on exit
+TMP_BODY=$(mktemp)
+trap "rm -f $TMP_BODY" EXIT
+
 echo "[+] Starting Advanced Structural File Analyzer..."
 echo "[+] Target List: $ALIVE_LIST"
 echo "[+] Valid findings will be saved to: $OUTPUT_FILE"
@@ -29,24 +33,30 @@ while read -r URL; do
     URL=$(echo "$URL" | sed 's/\/$//')
     echo "[*] Auditing: $URL"
 
-    # --- COLLECT UNIQUE 404 SIGNATURE PER DOMAIN ---
-    RANDOM_PATH="/detect_false_positive_$(date +%s)"
-    CUSTOM_404_CONTENT=$(curl -s --connect-timeout 3 --max-time 5 "$URL$RANDOM_PATH")
+    # --- 1 REQUEST: custom-404 fingerprint ---
+    RANDOM_PATH="/detect_fp_$(date +%s%N | md5sum | head -c 8)"
+    CUSTOM_404_CONTENT=$(curl -s --connect-timeout 4 --max-time 7 "$URL$RANDOM_PATH" 2>/dev/null)
     CUSTOM_404_HASH=$(echo -n "$CUSTOM_404_CONTENT" | md5sum | cut -d' ' -f1)
 
     for PATH_CHECK in "${SENSITIVE_PATHS[@]}"; do
-        # Fetch actual content
-        CONTENT=$(curl -s --connect-timeout 4 --max-time 6 "$URL$PATH_CHECK")
-        HTTP_CODE=$(curl -s -o /dev/null -w "%{http_code}" --connect-timeout 3 "$URL$PATH_CHECK")
 
-        # 1. Clean out generic drops
-        if [ "$HTTP_CODE" -ne 200 ] || [ -z "$CONTENT" ]; then
+        # --- 1 REQUEST per path: body → temp file, status code → variable ---
+        HTTP_CODE=$(curl -s \
+            --connect-timeout 4 \
+            --max-time 7 \
+            -o "$TMP_BODY" \
+            -w "%{http_code}" \
+            "$URL$PATH_CHECK" 2>/dev/null)
+        CONTENT=$(cat "$TMP_BODY")
+
+        # Skip non-200 and empty
+        if [ "$HTTP_CODE" != "200" ] || [ -z "$CONTENT" ]; then
             continue
         fi
 
-        # 2. Check if the page content matches the domain's custom 404 page body exactly
+        # Skip if matches custom-404 fingerprint
         CURRENT_HASH=$(echo -n "$CONTENT" | md5sum | cut -d' ' -f1)
-        if [ "$CURRENT_HASH" == "$CUSTOM_404_HASH" ]; then
+        if [ "$CURRENT_HASH" = "$CUSTOM_404_HASH" ]; then
             continue
         fi
 
@@ -55,7 +65,6 @@ while read -r URL; do
         # --- STRUCTURAL SIGNATURE VALIDATION ---
         case "$PATH_CHECK" in
             "/.env")
-                # Must look like KEY=VALUE pairs, not HTML
                 if [[ "$CONTENT" =~ [A-Za-z_][A-Za-z0-9_]*= ]]; then
                     if [[ ! "$CONTENT" =~ "<html" ]] && [[ ! "$CONTENT" =~ "<body" ]] && [[ ! "$CONTENT" =~ "<!DOCTYPE" ]]; then
                         IS_VALID=true
@@ -73,12 +82,9 @@ while read -r URL; do
                 fi
                 ;;
             "/composer.json"|"/package.json")
-                # Must be a JSON object (starts with {) — not an HTML page
                 CLEAN_START=$(echo "$CONTENT" | tr -d '[:space:]' | head -c 1)
                 if [[ "$CLEAN_START" == "{" ]]; then
-                    # Must not be an HTML error page
                     if [[ ! "$CONTENT" =~ "<html" ]] && [[ ! "$CONTENT" =~ "<body" ]] && [[ ! "$CONTENT" =~ "<!DOCTYPE" ]]; then
-                        # Must contain at least one common JSON package field
                         if [[ "$CONTENT" =~ "name" ]] || \
                            [[ "$CONTENT" =~ "version" ]] || \
                            [[ "$CONTENT" =~ "dependencies" ]] || \
