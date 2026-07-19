@@ -923,3 +923,402 @@ document.addEventListener('DOMContentLoaded', () => {
   }
 });
 
+
+/* =========================================================
+   Git-Dumper module (additive — wraps existing functions the
+   same way this file already does for loadSubdomainResults /
+   loadHistoryItem, rather than editing them in place)
+   ========================================================= */
+
+// ─── Wrap switchTab to also toggle the Git-Dumper module ──
+const _origSwitchTab = switchTab;
+window.switchTab = function(tab) {
+  _origSwitchTab(tab);
+  const mod = document.getElementById('module-gitdump');
+  const tabBtn = document.getElementById('tab-gitdump');
+  if (mod) mod.classList.toggle('hidden', tab !== 'gitdump');
+  if (tabBtn) tabBtn.classList.toggle('active', tab === 'gitdump');
+  if (tab === 'gitdump') checkGitDumperAvailability();
+};
+
+// ─── Wrap renderFindingsTable to surface .git findings ────
+const _origRenderFindingsTable = renderFindingsTable;
+window.renderFindingsTable = function(findings) {
+  _origRenderFindingsTable(findings);
+  addGitDumperSendButtons(findings);
+  collectGitDumpFindings(findings);
+};
+
+function addGitDumperSendButtons(findings) {
+  const tbody = document.getElementById('findings-tbody');
+  if (!tbody || !findings) return;
+  const rows = tbody.querySelectorAll('tr');
+  findings.forEach((url, i) => {
+    if (!url.includes('/.git/HEAD')) return;
+    const row = rows[i];
+    if (!row) return;
+    const actionTd = row.querySelector('td:last-child');
+    if (!actionTd || actionTd.querySelector('.btn-gitdump-send')) return;
+    const btn = document.createElement('button');
+    btn.className = 'btn-icon-only btn-gitdump-send';
+    btn.title = 'Send to Git-Dumper';
+    btn.textContent = '⎋';
+    btn.onclick = () => sendToGitDumper(url);
+    actionTd.appendChild(btn);
+  });
+}
+
+function collectGitDumpFindings(findings) {
+  if (!findings) return;
+  let added = false;
+  findings.forEach(url => {
+    if (url.includes('/.git/HEAD') && !state.gitdumpFindings.includes(url)) {
+      state.gitdumpFindings.push(url);
+      added = true;
+    }
+  });
+  if (added) renderGitDumpFindings();
+}
+
+// ─── Wrap stopScan to add the gitdump case ─────────────────
+const _origStopScan = stopScan;
+window.stopScan = function(type) {
+  if (type !== 'gitdump') { _origStopScan(type); return; }
+  const job = state.gitdumpJob;
+  if (!job || !job.id) { toast('No active dump to stop', true); return; }
+  fetch(`/api/jobs/${job.id}/stop`, { method: 'POST' })
+    .then(r => r.json())
+    .then(data => {
+      if (data.error) { toast(data.error, true); return; }
+      toast('■ Dump stopped.');
+    })
+    .catch(e => toast('Stop failed: ' + e.message, true));
+};
+
+// ─── Send a finding from Directory Scanner into Git-Dumper ─
+function sendToGitDumper(url) {
+  if (!state.gitdumpFindings.includes(url)) state.gitdumpFindings.push(url);
+  switchTab('gitdump');
+  renderGitDumpFindings();
+  selectGitDumpTarget(url);
+  toast('Loaded into Git-Dumper — review and confirm to run.');
+}
+
+function addCustomGitDumpTarget() {
+  const input = document.getElementById('gitdump-custom-url');
+  let url = input.value.trim();
+  if (!url) { toast('Enter a target URL', true); return; }
+  if (!url.startsWith('http://') && !url.startsWith('https://')) {
+    toast('URL must start with http:// or https://', true); return;
+  }
+  if (!url.endsWith('/.git/HEAD')) {
+    url = url.replace(/\/$/, '') + '/.git/HEAD';
+  }
+  if (!state.gitdumpFindings.includes(url)) state.gitdumpFindings.push(url);
+  renderGitDumpFindings();
+  selectGitDumpTarget(url);
+  input.value = '';
+}
+
+// ─── Render the findings list ──────────────────────────────
+function renderGitDumpFindings() {
+  const list = document.getElementById('gitdump-findings-list');
+  const empty = document.getElementById('gitdump-no-findings');
+  if (!list) return;
+  list.innerHTML = '';
+
+  if (!state.gitdumpFindings.length) {
+    if (empty) empty.style.display = 'flex';
+    return;
+  }
+  if (empty) empty.style.display = 'none';
+
+  state.gitdumpFindings.forEach(url => {
+    const selected = state.gitdumpSelected === url;
+    const row = document.createElement('div');
+    row.className = 'gitdump-finding-row' + (selected ? ' selected' : '');
+    const urlSpan = document.createElement('span');
+    urlSpan.className = 'gitdump-finding-url';
+    urlSpan.textContent = url;
+    const btn = document.createElement('button');
+    btn.className = 'btn-secondary btn-secondary--red btn-primary--small';
+    btn.textContent = selected ? '✓ Selected' : 'Select';
+    btn.onclick = () => selectGitDumpTarget(url);
+    row.appendChild(urlSpan);
+    row.appendChild(btn);
+    list.appendChild(row);
+  });
+}
+
+// ─── Select a target + fetch a preview of the command ──────
+function selectGitDumpTarget(url) {
+  state.gitdumpSelected = url;
+  document.getElementById('gitdump-target-display').textContent = url;
+  document.getElementById('gitdump-confirm-card').style.display = 'block';
+  const cb = document.getElementById('gitdump-authorized-checkbox');
+  if (cb) cb.checked = false;
+  document.getElementById('start-gitdump-btn').disabled = true;
+  renderGitDumpFindings();
+  previewGitDumpCommand();
+}
+
+function previewGitDumpCommand() {
+  if (!state.gitdumpSelected) return;
+  const label = document.getElementById('gitdump-label-input').value.trim();
+  fetch('/api/gitdump/preview', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ git_head_url: state.gitdumpSelected, label }),
+  })
+    .then(r => r.json())
+    .then(data => {
+      if (data.error) { toast(data.error, true); return; }
+      document.getElementById('gitdump-command-preview').textContent = data.command;
+      document.getElementById('gitdump-path-preview').textContent = data.dump_path;
+      document.getElementById('gitdump-venv-hint').textContent = data.venv_hint || '';
+    })
+    .catch(() => {});
+}
+
+function onGitDumpAuthChange() {
+  const checked = document.getElementById('gitdump-authorized-checkbox').checked;
+  document.getElementById('start-gitdump-btn').disabled = !checked || !state.gitdumpSelected;
+}
+
+// ─── Check whether the git-dumper binary is available ──────
+function checkGitDumperAvailability() {
+  fetch('/api/gitdump/check')
+    .then(r => r.json())
+    .then(data => {
+      const banner = document.getElementById('gitdump-availability-banner');
+      if (!banner) return;
+      if (data.available) {
+        banner.style.display = 'none';
+      } else {
+        banner.textContent = `⚠ git-dumper not found in the venv or on PATH. Install it first: source venv/bin/activate && pip install git-dumper`;
+        banner.style.display = 'flex';
+      }
+    })
+    .catch(() => {});
+}
+
+// ─── Start the dump ──────────────────────────────────────
+function startGitDump() {
+  if (!state.gitdumpSelected) { toast('Select a finding first', true); return; }
+  const authorized = document.getElementById('gitdump-authorized-checkbox').checked;
+  if (!authorized) { toast('Please confirm authorization before dumping.', true); return; }
+  if (state.gitdumpJob && state.gitdumpJob.status === 'running') {
+    toast('A dump is already running', true); return;
+  }
+
+  const label = document.getElementById('gitdump-label-input').value.trim();
+
+  clearTerminal('gitdump-terminal');
+  document.getElementById('gitdump-terminal-card').style.display = 'block';
+  document.getElementById('gitdump-stats-row').style.display = 'grid';
+  document.getElementById('gitdump-results-card').style.display = 'none';
+  document.getElementById('gitdump-stat-files').textContent = '0';
+  document.getElementById('gitdump-stat-elapsed').textContent = '0s';
+  document.getElementById('gitdump-badge').textContent = 'RUNNING';
+  document.getElementById('gitdump-badge').className = 'module-badge module-badge--running';
+  document.getElementById('start-gitdump-btn').disabled = true;
+  document.getElementById('stop-gitdump-btn').style.display = 'flex';
+
+  startElapsed('gitdumpElapsedTimer', 'gitdump-stat-elapsed');
+  termAppend('gitdump-terminal', `[*] Target: ${state.gitdumpSelected}`);
+
+  fetch('/api/gitdump/start', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ git_head_url: state.gitdumpSelected, label, authorized: true }),
+  })
+    .then(r => r.json())
+    .then(data => {
+      if (data.error) { toast(data.error, true); resetGitDumpBtn(); return; }
+      state.gitdumpJob = { id: data.job_id, label: data.label, status: 'running' };
+      streamGitDumpJob(data.job_id);
+      refreshHistory();
+    })
+    .catch(e => { toast('Failed to start dump: ' + e.message, true); resetGitDumpBtn(); });
+}
+
+function resetGitDumpBtn() {
+  const cb = document.getElementById('gitdump-authorized-checkbox');
+  document.getElementById('start-gitdump-btn').disabled = !(cb && cb.checked) || !state.gitdumpSelected;
+  document.getElementById('stop-gitdump-btn').style.display = 'none';
+  document.getElementById('gitdump-badge').textContent = 'READY';
+  document.getElementById('gitdump-badge').className = 'module-badge';
+  stopElapsed('gitdumpElapsedTimer');
+}
+
+// ─── SSE Stream for Git-Dumper ─────────────────────────────
+function streamGitDumpJob(jobId) {
+  const sse = new EventSource(`/api/jobs/${jobId}/stream`);
+  let fileCount = 0;
+
+  sse.onmessage = (e) => {
+    const data = JSON.parse(e.data);
+
+    if (data.error) { termAppend('gitdump-terminal', '[ERROR] ' + data.error); sse.close(); return; }
+
+    if (data.line) {
+      termAppend('gitdump-terminal', data.line);
+      if (/^\[?Fetching /i.test(data.line) || data.line.includes('.git/objects/')) {
+        fileCount++;
+        document.getElementById('gitdump-stat-files').textContent = fileCount;
+      }
+    }
+
+    if (data.done) {
+      removeCursor('gitdump-terminal');
+      sse.close();
+      stopElapsed('gitdumpElapsedTimer');
+      state.gitdumpJob.status = data.status;
+
+      if (data.status === 'completed') {
+        document.getElementById('gitdump-badge').textContent = 'DONE';
+        document.getElementById('gitdump-badge').className = 'module-badge module-badge--done';
+        loadGitDumpResults(data.result);
+      } else {
+        document.getElementById('gitdump-badge').textContent = data.status === 'stopped' ? 'STOPPED' : 'FAILED';
+        document.getElementById('gitdump-badge').className = 'module-badge module-badge--failed';
+        if (data.status !== 'stopped') toast('Dump failed. Check terminal output.', true);
+      }
+      document.getElementById('start-gitdump-btn').disabled = false;
+      document.getElementById('stop-gitdump-btn').style.display = 'none';
+      refreshHistory();
+    }
+  };
+
+  sse.onerror = () => {
+    termAppend('gitdump-terminal', '[ERROR] Connection to server lost.');
+    sse.close();
+    resetGitDumpBtn();
+  };
+}
+
+function loadGitDumpResults(result) {
+  if (!result) return;
+  document.getElementById('gitdump-stat-files').textContent = result.file_count || 0;
+  document.getElementById('gitdump-results-card').style.display = 'block';
+  document.getElementById('gitdump-result-path').textContent = result.dump_path || '—';
+  document.getElementById('gitdump-result-target').textContent = result.target || '—';
+  document.getElementById('gitdump-result-count').textContent = result.file_count || 0;
+
+  toast(result.file_count > 0
+    ? `✓ Dump complete — ${result.file_count} files saved`
+    : '⚠ Dump finished but no files retrieved');
+}
+
+function copyGitDumpPath() {
+  const path = document.getElementById('gitdump-result-path').textContent;
+  if (!path || path === '—') return;
+  navigator.clipboard.writeText(path).then(() => toast('Path copied ✓')).catch(() => {});
+}
+
+// ─── Init: extend state + wire up the panel's inputs ───────
+document.addEventListener('DOMContentLoaded', () => {
+  state.gitdumpJob = null;
+  state.gitdumpFindings = [];
+  state.gitdumpSelected = null;
+  state.gitdumpElapsedTimer = null;
+
+  const authCb = document.getElementById('gitdump-authorized-checkbox');
+  if (authCb) authCb.addEventListener('change', onGitDumpAuthChange);
+
+  const labelInput = document.getElementById('gitdump-label-input');
+  if (labelInput) labelInput.addEventListener('input', () => previewGitDumpCommand());
+
+  const customInput = document.getElementById('gitdump-custom-url');
+  if (customInput) {
+    customInput.addEventListener('keydown', e => {
+      if (e.key === 'Enter') addCustomGitDumpTarget();
+    });
+  }
+
+  renderGitDumpFindings();
+});
+
+// ─── Patch: history item restore for gitdump type ──────────
+const _origLoadHistoryItem2 = window.loadHistoryItem;
+window.loadHistoryItem = function(jobId, type) {
+  if (type !== 'gitdump') { _origLoadHistoryItem2(jobId, type); return; }
+
+  toast('Loading dump results...');
+  fetch(`/api/jobs/${jobId}/status`)
+    .then(r => r.json())
+    .then(job => {
+      if (job.error) { toast('Could not load job', true); return; }
+      switchTab('gitdump');
+
+      const result = job.result || {};
+      document.getElementById('gitdump-stats-row').style.display = 'grid';
+      document.getElementById('gitdump-stat-files').textContent = result.file_count || 0;
+      document.getElementById('gitdump-stat-elapsed').textContent = '—';
+      document.getElementById('gitdump-badge').textContent = 'DONE';
+      document.getElementById('gitdump-badge').className = 'module-badge module-badge--done';
+      document.getElementById('gitdump-terminal-card').style.display = 'none';
+      loadGitDumpResults(result);
+
+      document.getElementById('history-panel').classList.remove('open');
+    })
+    .catch(e => toast('Failed: ' + e.message, true));
+};
+
+// ─── Patch: refreshHistory to label gitdump entries properly ──
+window.refreshHistory = function() {
+  fetch('/api/sessions')
+    .then(r => r.json())
+    .then(sessions => {
+      const list = document.getElementById('history-list');
+      if (!sessions.length) {
+        list.innerHTML = '<div class="history-empty">No scans yet</div>';
+        return;
+      }
+      list.innerHTML = sessions.map(s => {
+        const dt = new Date(s.created_at).toLocaleString();
+        const meta = s.type === 'subdomain'
+          ? `Alive: ${s.result_summary?.alive_count ?? '—'}`
+          : s.type === 'gitdump'
+          ? `Dump: ${s.status === 'completed' ? 'done' : s.status}`
+          : `Findings: ${s.result_summary?.total_findings ?? '—'}`;
+        const statusColor = s.status === 'completed' ? 'var(--green)' : s.status === 'failed' ? 'var(--red)' : 'var(--cyan)';
+        const canLoad    = s.status === 'completed';
+        const canJump    = s.status === 'running';
+        const isClickable = canLoad || canJump;
+
+        const ctaText = canLoad ? 'Click to view results →'
+                      : canJump ? 'Click to view live scan →'
+                      : '';
+
+        const onclickAttr = canLoad ? `onclick="loadHistoryItem('${s.id}','${s.type}')"`
+                          : canJump ? `onclick="jumpToRunning('${s.type}')"`
+                          : '';
+
+        const typeLabel = s.type === 'subdomain' ? '◈ SUBDOMAIN'
+                         : s.type === 'commondir' ? '◈ COMMON DIR'
+                         : s.type === 'gitdump'   ? '⎋ GIT-DUMPER'
+                         : '◉ DIR SCAN';
+
+        return `<div class="history-item${isClickable ? ' history-item--clickable' : ''}" ${onclickAttr}>
+          <div class="history-item-top">
+            <div class="history-item-type">${typeLabel}</div>
+            <div class="history-item-status" style="color:${statusColor}">${s.status.toUpperCase()}</div>
+          </div>
+          <div class="history-item-domain">${s.domain}</div>
+          <div class="history-item-meta">${meta} · ${dt}</div>
+          ${isClickable ? `<div class="history-item-cta">${ctaText}</div>` : ''}
+        </div>`;
+      }).join('');
+    })
+    .catch(() => {});
+};
+
+// ─── Patch: jumpToRunning to support gitdump ───────────────
+const _origJumpToRunning = jumpToRunning;
+window.jumpToRunning = function(type) {
+  if (type !== 'gitdump') { _origJumpToRunning(type); return; }
+  switchTab('gitdump');
+  document.getElementById('gitdump-terminal-card').style.display = 'block';
+  document.getElementById('history-panel').classList.remove('open');
+};

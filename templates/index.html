@@ -31,6 +31,9 @@
       <button class="nav-tab" id="tab-dirscan" onclick="switchTab('dirscan')">
         <span class="tab-icon">◉</span> Directory Scanner
       </button>
+      <button class="nav-tab" id="tab-gitdump" onclick="switchTab('gitdump')">
+        <span class="tab-icon">⎋</span> Git-Dumper
+      </button>
     </div>
     <div class="nav-status">
       <span class="status-dot" id="server-dot"></span>
@@ -409,6 +412,152 @@
         </div>
 
       </div><!-- /dirpanel-common -->
+
+    </section>
+
+    <!-- ══════════════════════════════════ -->
+    <!--  MODULE 3 — GIT-DUMPER             -->
+    <!-- ══════════════════════════════════ -->
+    <section class="module hidden" id="module-gitdump">
+
+      <div class="module-header">
+        <div class="module-title-group">
+          <h1 class="module-title">Git-Dumper</h1>
+          <p class="module-subtitle">Extract an exposed .git repository from a confirmed finding — one target at a time</p>
+        </div>
+        <div class="module-badge" id="gitdump-badge">READY</div>
+      </div>
+
+      <div class="auth-banner" id="gitdump-availability-banner" style="display:none"></div>
+
+      <div class="auth-banner auth-banner--info">
+        ⎋ Every dump here is a manual, per-target action. Findings are never dumped automatically —
+        you pick one below, confirm you're authorized to test it, then run it yourself.
+      </div>
+
+      <!-- Detected findings -->
+      <div class="card">
+        <div class="results-header">
+          <h2 class="results-title">Detected /.git/HEAD Exposures</h2>
+        </div>
+        <div id="gitdump-findings-list" class="gitdump-findings-list"></div>
+        <div class="no-findings" id="gitdump-no-findings">
+          <span class="no-findings-icon">·</span>
+          <span>No /.git/HEAD exposures yet — run a Sensitive File Scan on the Directory Scanner tab, or add a target manually below.</span>
+        </div>
+
+        <div class="target-chips-label" style="margin-top:1.4rem">ADD TARGET MANUALLY</div>
+        <div class="input-row">
+          <div class="input-wrapper" style="flex:1">
+            <span class="input-prefix">⎋</span>
+            <input type="text" id="gitdump-custom-url" class="domain-input"
+              placeholder="https://target.example/.git/HEAD" spellcheck="false" />
+          </div>
+          <button class="btn-secondary" onclick="addCustomGitDumpTarget()">+ Add</button>
+        </div>
+      </div>
+
+      <!-- Confirm & run -->
+      <div class="card" id="gitdump-confirm-card" style="display:none">
+        <div class="results-header">
+          <h2 class="results-title">Confirm &amp; Run</h2>
+        </div>
+
+        <div class="target-chips-label">SELECTED TARGET</div>
+        <div class="alive-file-display">
+          <span class="alive-file-icon">⎋</span>
+          <span class="alive-file-path" id="gitdump-target-display">—</span>
+        </div>
+
+        <div style="margin-top:1rem">
+          <label class="input-label" for="gitdump-label-input">DUMP FOLDER LABEL (optional)</label>
+          <div class="input-row">
+            <div class="input-wrapper" style="flex:1">
+              <span class="input-prefix">@</span>
+              <input type="text" id="gitdump-label-input" class="domain-input"
+                placeholder="defaults to the hostname" spellcheck="false" />
+            </div>
+          </div>
+        </div>
+
+        <div class="gitdump-preview">
+          <div class="gitdump-preview-row">
+            <span class="gitdump-preview-label">Command</span>
+            <code class="gitdump-preview-value" id="gitdump-command-preview">—</code>
+          </div>
+          <div class="gitdump-preview-row">
+            <span class="gitdump-preview-label">Saves to</span>
+            <code class="gitdump-preview-value" id="gitdump-path-preview">—</code>
+          </div>
+          <div class="gitdump-preview-hint" id="gitdump-venv-hint"></div>
+        </div>
+
+        <label class="auth-checkbox-row" for="gitdump-authorized-checkbox">
+          <input type="checkbox" id="gitdump-authorized-checkbox" />
+          <span>I confirm I am authorized to test this specific target and extract its repository data.</span>
+        </label>
+
+        <div class="input-row" style="margin-top:1rem">
+          <button class="btn-primary" id="start-gitdump-btn" onclick="startGitDump()" disabled
+            style="background:linear-gradient(135deg,#ff4466,#c22e48);box-shadow:0 4px 15px rgba(255,68,102,0.25)">
+            <span class="btn-icon">⎋</span>
+            <span class="btn-text">Run Dump</span>
+          </button>
+          <button class="btn-stop" id="stop-gitdump-btn" onclick="stopScan('gitdump')" style="display:none">
+            <span class="btn-icon">■</span> Stop
+          </button>
+        </div>
+      </div>
+
+      <!-- Stats -->
+      <div class="stats-row" id="gitdump-stats-row" style="display:none">
+        <div class="stat-card stat-card--red">
+          <span class="stat-value" id="gitdump-stat-files">0</span>
+          <span class="stat-label">Files Retrieved</span>
+        </div>
+        <div class="stat-card">
+          <span class="stat-value" id="gitdump-stat-elapsed">0s</span>
+          <span class="stat-label">Elapsed</span>
+        </div>
+      </div>
+
+      <!-- Terminal -->
+      <div class="card terminal-card" id="gitdump-terminal-card" style="display:none">
+        <div class="terminal-header">
+          <div class="terminal-dots">
+            <span class="dot dot-red"></span><span class="dot dot-yellow"></span><span class="dot dot-green"></span>
+          </div>
+          <span class="terminal-title">bash — git-dumper</span>
+          <button class="btn-icon-only" onclick="clearTerminal('gitdump-terminal')" title="Clear">⌫</button>
+        </div>
+        <div class="terminal-body" id="gitdump-terminal"></div>
+      </div>
+
+      <!-- Results -->
+      <div class="card results-card" id="gitdump-results-card" style="display:none">
+        <div class="results-header">
+          <h2 class="results-title">Dump Complete</h2>
+          <div class="results-actions">
+            <button class="btn-secondary btn-secondary--red" onclick="copyGitDumpPath()">
+              ⧉ Copy Path
+            </button>
+          </div>
+        </div>
+        <div class="gitdump-preview">
+          <div class="gitdump-preview-row">
+            <span class="gitdump-preview-label">Target</span>
+            <code class="gitdump-preview-value" id="gitdump-result-target">—</code>
+          </div>
+          <div class="gitdump-preview-row">
+            <span class="gitdump-preview-label">Saved to</span>
+            <code class="gitdump-preview-value" id="gitdump-result-path">—</code>
+          </div>
+          <div class="gitdump-preview-row">
+            <span class="gitdump-preview-label">Files</span>
+            <code class="gitdump-preview-value" id="gitdump-result-count">0</code>
+          </div>
+        </div>
+      </div>
 
     </section>
 

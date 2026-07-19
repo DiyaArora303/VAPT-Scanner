@@ -544,3 +544,45 @@ body {
   .nav-status { display: none; }
   .map-tooltip { right: 0; top: -40px; }
 }
+
+/* ── Git-Dumper module (additive — doesn't touch any rule above) ── */
+.auth-banner {
+  display: flex; align-items: center; gap: 0.6rem;
+  padding: 0.7rem 1rem; border-radius: 8px; font-size: 0.8rem;
+  border: 1px solid rgba(255,68,102,0.35); background: rgba(255,68,102,0.08); color: var(--red);
+}
+.auth-banner--info {
+  border-color: rgba(0,212,255,0.25); background: rgba(0,212,255,0.05); color: var(--text-dim);
+  font-family: var(--mono); font-size: 0.75rem;
+}
+.gitdump-findings-list { display: flex; flex-direction: column; gap: 0.5rem; }
+.gitdump-finding-row {
+  display: flex; align-items: center; justify-content: space-between; gap: 1rem;
+  padding: 0.6rem 0.9rem; border: 1px solid var(--border); border-radius: 8px;
+  background: rgba(255,255,255,0.015);
+}
+.gitdump-finding-row.selected { border-color: var(--red); background: rgba(255,68,102,0.06); }
+.gitdump-finding-url {
+  font-family: var(--mono); font-size: 0.78rem; color: var(--cyan); word-break: break-all;
+}
+.gitdump-preview { margin-top: 1rem; display: flex; flex-direction: column; gap: 0.5rem; }
+.gitdump-preview-row {
+  display: flex; flex-direction: column; gap: 0.2rem;
+  padding: 0.6rem 0.8rem; border-radius: 8px;
+  background: rgba(255,255,255,0.02); border: 1px solid var(--border);
+}
+.gitdump-preview-label {
+  font-family: var(--mono); font-size: 0.65rem; letter-spacing: 0.1em; color: var(--text-dim);
+}
+.gitdump-preview-value {
+  font-family: var(--mono); font-size: 0.78rem; color: var(--text); word-break: break-all;
+}
+.gitdump-preview-hint { font-size: 0.7rem; color: var(--text-muted); margin-top: 0.2rem; }
+.auth-checkbox-row {
+  display: flex; align-items: flex-start; gap: 0.6rem; margin-top: 1.2rem;
+  padding: 0.8rem 1rem; border-radius: 8px; cursor: pointer;
+  border: 1px solid rgba(255,68,102,0.3); background: rgba(255,68,102,0.05);
+  font-size: 0.8rem; color: var(--text);
+}
+.auth-checkbox-row input[type="checkbox"] { margin-top: 0.15rem; accent-color: var(--red); }
+.btn-gitdump-send { color: var(--red) !important; }
