@@ -483,6 +483,57 @@ body {
 ::-webkit-scrollbar-track { background: var(--bg2); }
 ::-webkit-scrollbar-thumb { background: var(--text-muted); border-radius: 3px; }
 
+/* ── MAP OF INDIA ── */
+.map-card {
+  padding: 2rem;
+  display: flex;
+  justify-content: center;
+  align-items: center;
+}
+.map-container {
+  position: relative;
+  width: 100%;
+  max-width: 450px;
+  margin: 0 auto;
+}
+.map-container svg {
+  width: 100%;
+  height: auto;
+  filter: drop-shadow(0 0 10px rgba(0,255,140,0.1));
+}
+.map-container svg path {
+  fill: var(--bg3);
+  stroke: var(--green);
+  stroke-width: 1.5;
+  transition: all 0.3s ease;
+  cursor: pointer;
+}
+.map-container svg path:hover {
+  fill: rgba(0,255,140,0.2);
+  stroke-width: 2.5;
+  filter: drop-shadow(0 0 8px var(--green));
+}
+.map-tooltip {
+  position: absolute;
+  top: 0px;
+  right: -80px;
+  background: rgba(10,12,16,0.9);
+  border: 1px solid var(--green);
+  color: var(--green);
+  padding: 8px 16px;
+  border-radius: var(--radius);
+  font-family: var(--mono);
+  font-size: 0.85rem;
+  font-weight: 700;
+  pointer-events: none;
+  opacity: 0;
+  transition: opacity 0.2s ease;
+  box-shadow: var(--glow-green);
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+  z-index: 10;
+}
+
 /* ── RESPONSIVE ── */
 @media (max-width: 700px) {
   .navbar { padding: 0.8rem 1rem; flex-wrap: wrap; }
@@ -491,4 +542,5 @@ body {
   .module-header { flex-direction: column; gap: 0.5rem; }
   .results-header { flex-direction: column; }
   .nav-status { display: none; }
+  .map-tooltip { right: 0; top: -40px; }
 }

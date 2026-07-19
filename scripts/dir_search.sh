@@ -117,7 +117,7 @@ while read -r URL; do
             echo "$URL$PATH_CHECK" >> "$OUTPUT_FILE"
         fi
     done
-done < "$ALIVE_LIST"
+done < <(sort -u "$ALIVE_LIST")
 
 echo "------------------------------------------------"
 echo "[+] Scan complete. Total verified exposures saved: $(wc -l < "$OUTPUT_FILE" 2>/dev/null || echo 0)"

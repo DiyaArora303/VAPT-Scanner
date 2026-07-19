@@ -141,6 +141,11 @@ function startSubdomainScan() {
   // Reset UI
   resetChips();
   clearTerminal('sub-terminal');
+  
+  // Hide Map, show Terminal
+  const mapCard = document.getElementById('sub-map-card');
+  if (mapCard) mapCard.style.display = 'none';
+
   document.getElementById('sub-terminal-card').style.display = 'block';
   document.getElementById('sub-stats-row').style.display = 'grid';
   document.getElementById('sub-results-card').style.display = 'none';
@@ -891,4 +896,30 @@ window.loadHistoryItem = function(jobId, type) {
     })
     .catch(e => toast('Failed: ' + e.message, true));
 };
+
+// ─── Map Interaction ──────────────────────────────────────
+document.addEventListener('DOMContentLoaded', () => {
+  const mapTooltip = document.getElementById('map-tooltip');
+  const indiaMapContainer = document.getElementById('india-map-container');
+  
+  if (indiaMapContainer && mapTooltip) {
+    const initMap = () => {
+      const paths = indiaMapContainer.querySelectorAll('path');
+      paths.forEach(path => {
+        path.addEventListener('mouseenter', (e) => {
+          let stateName = path.getAttribute('aria-label') || path.getAttribute('title') || path.getAttribute('id');
+          if (stateName) {
+            stateName = stateName.replace('IN-', '').replace(/-/g, ' ');
+            mapTooltip.textContent = stateName;
+            mapTooltip.style.opacity = '1';
+          }
+        });
+        path.addEventListener('mouseleave', () => {
+          mapTooltip.style.opacity = '0';
+        });
+      });
+    };
+    initMap();
+  }
+});
 

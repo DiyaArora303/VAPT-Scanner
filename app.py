@@ -158,7 +158,9 @@ def run_dirscan_script(job_id, alive_file, domain):
         findings = []
         if os.path.exists(output_file):
             with open(output_file) as f:
-                findings = [l.strip() for l in f if l.strip()]
+                # Use a set to deduplicate, but keep order if desired (using dict keys)
+                lines = [l.strip() for l in f if l.strip()]
+                findings = list(dict.fromkeys(lines))
 
         result = {
             "domain": domain,
