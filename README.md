@@ -26,6 +26,11 @@ A professional web application for automating VAPT (Vulnerability Assessment & P
 - Reports only **HTTP 200 OK** responses
 - Independent of subdomain scan — takes a direct URL input
 
+### 4. Git-Dumper Integration
+- Automated extraction of exposed `/.git` repositories
+- Seamlessly dumps repository contents to the local machine (`/home/kali/`)
+- Integrates directly with findings from the Sensitive File Scanner
+
 ---
 
 ## 🏗️ Architecture
