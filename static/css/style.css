@@ -102,6 +102,19 @@ body {
   0%,100% { opacity:1; }
   50% { opacity:0.4; }
 }
+.nav-logo-right {
+  height: 50px;
+  margin-left: 14px;
+  border-radius: 6px;
+  background-color: #ffffff;
+  padding: 4px 8px;
+  box-shadow: 0 0 10px rgba(255, 255, 255, 0.1);
+  transition: all 0.3s ease;
+}
+.nav-logo-right:hover {
+  box-shadow: 0 0 12px rgba(255, 255, 255, 0.3);
+  transform: translateY(-1px);
+}
 
 /* ── MAIN LAYOUT ── */
 .main-content {
