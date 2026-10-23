@@ -1,0 +1,159 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <title>VAPT Scanner — Architecture & Workflow Diagram</title>
+  <style>
+    body {
+      margin: 0;
+      padding: 24px;
+      background: #0b0f19;
+      color: #f1f5f9;
+      font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+    }
+    .header-bar {
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+      width: 100%;
+      max-width: 1020px;
+      margin-bottom: 20px;
+      flex-wrap: wrap;
+      gap: 12px;
+    }
+    h1 {
+      font-size: 20px;
+      margin: 0;
+      color: #38bdf8;
+    }
+    .actions {
+      display: flex;
+      gap: 10px;
+    }
+    .btn {
+      background: #1e293b;
+      color: #f8fafc;
+      border: 1px solid #38bdf8;
+      padding: 9px 18px;
+      border-radius: 8px;
+      cursor: pointer;
+      font-size: 13px;
+      font-weight: 600;
+      transition: all 0.2s ease;
+      text-decoration: none;
+      display: inline-flex;
+      align-items: center;
+      gap: 6px;
+    }
+    .btn:hover {
+      background: #38bdf8;
+      color: #0b0f19;
+    }
+    .btn-green {
+      border-color: #10b981;
+    }
+    .btn-green:hover {
+      background: #10b981;
+      color: #0b0f19;
+    }
+    .diagram-container {
+      width: 100%;
+      max-width: 1020px;
+      background: #090d16;
+      border: 1px solid #1e293b;
+      border-radius: 12px;
+      box-shadow: 0 10px 30px rgba(0, 0, 0, 0.6);
+      overflow: hidden;
+      padding: 10px;
+    }
+    svg {
+      width: 100%;
+      height: auto;
+      display: block;
+    }
+    canvas {
+      display: none;
+    }
+  </style>
+</head>
+<body>
+
+  <div class="header-bar">
+    <div>
+      <h1>🔐 VAPT Scanner — Final Architecture & Flow Diagram</h1>
+      <span style="font-size: 13px; color: #94a3b8;">End-to-End Execution Flow & Security Recon Tools</span>
+    </div>
+    <div class="actions">
+      <button class="btn btn-green" onclick="downloadPNG()">📥 Download PNG</button>
+      <button class="btn" onclick="downloadSVG()">📥 Download SVG</button>
+      <button class="btn" onclick="window.print()">🖨️ Print / Save PDF</button>
+    </div>
+  </div>
+
+  <div class="diagram-container" id="diagramWrapper">
+    <!-- Embed SVG content -->
+    <img id="svgImg" src="vapt_architecture_flow.svg" style="display:none;" />
+    <div id="svgContainer"></div>
+  </div>
+
+  <canvas id="exportCanvas"></canvas>
+
+  <script>
+    // Fetch and embed the SVG directly
+    fetch('vapt_architecture_flow.svg')
+      .then(res => res.text())
+      .then(svgText => {
+        document.getElementById('svgContainer').innerHTML = svgText;
+      })
+      .catch(err => {
+        document.getElementById('svgContainer').innerHTML = "<p style='color:red;'>Could not load SVG. Please ensure vapt_architecture_flow.svg is in the same folder.</p>";
+      });
+
+    function downloadSVG() {
+      const svgElement = document.querySelector('#svgContainer svg');
+      if (!svgElement) return alert('SVG not loaded yet');
+      const svgData = new XMLSerializer().serializeToString(svgElement);
+      const blob = new Blob([svgData], { type: 'image/svg+xml;charset=utf-8' });
+      const url = URL.createObjectURL(blob);
+      const a = document.createElement('a');
+      a.href = url;
+      a.download = 'vapt_architecture_flow.svg';
+      document.body.appendChild(a);
+      a.click();
+      document.body.removeChild(a);
+    }
+
+    function downloadPNG() {
+      const svgElement = document.querySelector('#svgContainer svg');
+      if (!svgElement) return alert('SVG not loaded yet');
+      const svgData = new XMLSerializer().serializeToString(svgElement);
+      const svgBlob = new Blob([svgData], { type: 'image/svg+xml;charset=utf-8' });
+      const URL_API = window.URL || window.webkitURL || window;
+      const blobURL = URL_API.createObjectURL(svgBlob);
+      
+      const img = new Image();
+      img.onload = function() {
+        const canvas = document.getElementById('exportCanvas');
+        canvas.width = 2000;  // High resolution 2x
+        canvas.height = 2500;
+        const ctx = canvas.getContext('2d');
+        ctx.fillStyle = '#090d16';
+        ctx.fillRect(0, 0, canvas.width, canvas.height);
+        ctx.drawImage(img, 0, 0, canvas.width, canvas.height);
+        
+        const pngUrl = canvas.toDataURL('image/png');
+        const a = document.createElement('a');
+        a.href = pngUrl;
+        a.download = 'vapt_architecture_flow.png';
+        document.body.appendChild(a);
+        a.click();
+        document.body.removeChild(a);
+      };
+      img.src = blobURL;
+    }
+  </script>
+</body>
+</html>

@@ -1,587 +1,364 @@
 <!DOCTYPE html>
 <html lang="en">
 <head>
-  <meta charset="UTF-8" />
-  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-  <title>VAPT Scanner — Recon Suite</title>
-  <meta name="description" content="Professional VAPT reconnaissance suite for subdomain enumeration and sensitive directory discovery." />
-  <link rel="preconnect" href="https://fonts.googleapis.com" />
-  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
-  <link href="https://fonts.googleapis.com/css2?family=JetBrains+Mono:wght@300;400;500;700&family=Inter:wght@300;400;500;600;700&display=swap" rel="stylesheet" />
-  <link rel="stylesheet" href="/static/css/style.css" />
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>VAPT Recon Suite v2.4</title>
+    <link rel="stylesheet" href="/static/css/style.css">
 </head>
 <body>
+    <!-- BACKGROUND FX -->
+    <div class="bg-grid"></div>
+    <div class="bg-glow bg-glow-1"></div>
+    <div class="bg-glow bg-glow-2"></div>
 
-  <!-- ── BACKGROUND GRID ── -->
-  <div class="bg-grid"></div>
-  <div class="bg-glow bg-glow-1"></div>
-  <div class="bg-glow bg-glow-2"></div>
-
-  <!-- ── TOP NAV ── -->
-  <nav class="navbar" id="navbar">
-    <div class="nav-brand">
-      <span class="brand-icon">⬡</span>
-      <span class="brand-text">VAPT<span class="brand-accent">Scanner</span></span>
-      <span class="brand-tag">RECON SUITE | DEV: UGAL SHARMA</span>
-    </div>
-    <div class="nav-tabs">
-      <button class="nav-tab active" id="tab-subdomain" onclick="switchTab('subdomain')">
-        <span class="tab-icon">◈</span> Subdomain Finder
-      </button>
-      <button class="nav-tab" id="tab-dirscan" onclick="switchTab('dirscan')">
-        <span class="tab-icon">◉</span> Directory Scanner
-      </button>
-      <button class="nav-tab" id="tab-gitdump" onclick="switchTab('gitdump')">
-        <span class="tab-icon">⎋</span> Git-Dumper
-      </button>
-    </div>
-    <div class="nav-status">
-      <span class="status-dot" id="server-dot"></span>
-      <span class="status-label" id="server-label">Connected</span>
-      <img src="/static/images/i4c_logo.webp" alt="I4C Logo" class="nav-logo-right" title="I4C (Indian Cyber Crime Coordination Centre)" />
-    </div>
-  </nav>
-
-  <!-- ── MAIN CONTENT ── -->
-  <main class="main-content">
-
-    <!-- ══════════════════════════════════ -->
-    <!--  MODULE 1 — SUBDOMAIN FINDER       -->
-    <!-- ══════════════════════════════════ -->
-    <section class="module" id="module-subdomain">
-
-      <div class="module-header">
-        <div class="module-title-group">
-          <h1 class="module-title">Subdomain Enumeration</h1>
-          <p class="module-subtitle">Passive recon using Subfinder · Assetfinder · Amass · Chaos · CertSpotter · Anubis</p>
+    <!-- NAVBAR -->
+    <nav class="navbar">
+        <div class="nav-brand">
+            <span class="brand-icon">🛡️</span>
+            <span class="brand-text">VAPT<span class="accent">Suite</span></span>
+            <span class="brand-tag">v2.4</span>
         </div>
-        <div class="module-badge" id="sub-badge">READY</div>
-      </div>
-
-      <!-- Input card -->
-      <div class="card input-card">
-        <label class="input-label" for="domain-input">TARGET DOMAIN</label>
-        <div class="input-row">
-          <div class="input-wrapper">
-            <span class="input-prefix">$</span>
-            <input
-              type="text"
-              id="domain-input"
-              class="domain-input"
-              placeholder="example.com"
-              autocomplete="off"
-              spellcheck="false"
-            />
-          </div>
-          <button class="btn-primary" id="start-sub-btn" onclick="startSubdomainScan()">
-            <span class="btn-icon">▶</span>
-            <span class="btn-text">Start Scan</span>
-          </button>
-          <button class="btn-stop" id="stop-sub-btn" onclick="stopScan('subdomain')" style="display:none">
-            <span class="btn-icon">■</span> Stop
-          </button>
+        <div class="nav-tabs">
+            <button class="nav-tab active" onclick="switchTab('recon')" id="tab-recon">Recon Dashboard</button>
+            <button class="nav-tab" onclick="switchTab('subdomains')" id="tab-subdomains">Subdomains</button>
+            <button class="nav-tab" onclick="switchTab('associated')" id="tab-associated">Associated</button>
+            <button class="nav-tab" onclick="switchTab('ports')" id="tab-ports">Open Services</button>
+            <button class="nav-tab" onclick="switchTab('crawler')" id="tab-crawler">Crawler</button>
+            <button class="nav-tab" onclick="switchTab('exposures')" id="tab-exposures">Exposures</button>
+            <button class="nav-tab" onclick="switchTab('gitdump')" id="tab-gitdump">Git Dump</button>
         </div>
-        <div class="tool-chips">
-          <span class="chip" id="chip-subfinder">subfinder</span>
-          <span class="chip" id="chip-assetfinder">assetfinder</span>
-          <span class="chip" id="chip-amass">amass</span>
-          <span class="chip" id="chip-chaos">chaos</span>
-          <span class="chip" id="chip-github">github-subs</span>
-          <span class="chip" id="chip-certspotter">certspotter</span>
-          <span class="chip" id="chip-anubis">anubis</span>
+        <div class="nav-status">
+            <div class="status-dot" id="server-dot"></div>
+            <span class="status-label" id="server-label">Ready</span>
         </div>
-      </div>
+    </nav>
 
-      <!-- Stats row -->
-      <div class="stats-row" id="sub-stats-row" style="display:none">
-        <div class="stat-card">
-          <span class="stat-value" id="stat-total">0</span>
-          <span class="stat-label">Total Found</span>
-        </div>
-        <div class="stat-card stat-card--alive">
-          <span class="stat-value" id="stat-alive">0</span>
-          <span class="stat-label">Alive Hosts</span>
-        </div>
-        <div class="stat-card">
-          <span class="stat-value" id="stat-elapsed">0s</span>
-          <span class="stat-label">Elapsed</span>
-        </div>
-      </div>
-
-      <!-- Map Card -->
-      <div class="card map-card" id="sub-map-card">
-        <div class="map-container" id="india-map-container">
-          {% include 'india.svg' %}
-          <div id="map-tooltip" class="map-tooltip"></div>
-        </div>
-      </div>
-
-      <!-- Terminal -->
-      <div class="card terminal-card" id="sub-terminal-card" style="display:none">
-        <div class="terminal-header">
-          <div class="terminal-dots">
-            <span class="dot dot-red"></span>
-            <span class="dot dot-yellow"></span>
-            <span class="dot dot-green"></span>
-          </div>
-          <span class="terminal-title" id="sub-terminal-title">bash — subdomain_finder.sh</span>
-          <button class="btn-icon-only" onclick="clearTerminal('sub-terminal')" title="Clear">⌫</button>
-        </div>
-        <div class="terminal-body" id="sub-terminal"></div>
-      </div>
-
-      <!-- Results -->
-      <div class="card results-card" id="sub-results-card" style="display:none">
-        <div class="results-header">
-          <h2 class="results-title">Discovered Subdomains</h2>
-          <div class="results-actions">
-            <button class="btn-secondary" id="btn-dl-all-subs" onclick="downloadFile('all')">
-              ↓ All Subdomains
-            </button>
-            <button class="btn-secondary btn-secondary--green" id="btn-dl-alive-subs" onclick="downloadFile('alive')">
-              ↓ Alive Domains
-            </button>
-            <button class="btn-primary btn-primary--small" id="btn-run-dirscan" onclick="passToDirectoryScanner()">
-              ◉ Run Dir Scan →
-            </button>
-          </div>
-        </div>
-
-        <div class="tabs-inner">
-          <button class="inner-tab active" id="itab-alive" onclick="showResultTab('alive')">
-            Alive <span class="tab-count" id="alive-count-badge">0</span>
-          </button>
-          <button class="inner-tab" id="itab-all" onclick="showResultTab('all')">
-            All Subdomains <span class="tab-count" id="all-count-badge">0</span>
-          </button>
-        </div>
-
-        <div id="results-table-container">
-          <table class="results-table" id="results-table">
-            <thead>
-              <tr>
-                <th>#</th>
-                <th>Host / URL</th>
-                <th>Status</th>
-                <th>Action</th>
-              </tr>
-            </thead>
-            <tbody id="results-tbody"></tbody>
-          </table>
-        </div>
-      </div>
-
-    </section>
-
-    <!-- ══════════════════════════════════════════════ -->
-    <!--  MODULE 2 — DIRECTORY SCANNER (two sub-tabs) -->
-    <!-- ══════════════════════════════════════════════ -->
-    <section class="module hidden" id="module-dirscan">
-
-      <div class="module-header">
-        <div class="module-title-group">
-          <h1 class="module-title">Directory Scanner</h1>
-          <p class="module-subtitle">Two scan modes: Sensitive File Exposure · Common Directory Enumeration</p>
-        </div>
-        <div class="module-badge module-badge--orange" id="dir-badge">READY</div>
-      </div>
-
-      <!-- ── SUB-TAB SWITCHER ── -->
-      <div class="dir-subtab-bar">
-        <button class="dir-subtab active" id="dsubtab-sensitive" onclick="switchDirSubTab('sensitive')">
-          <span>🔐</span> Sensitive File Scan
-        </button>
-        <button class="dir-subtab" id="dsubtab-common" onclick="switchDirSubTab('common')">
-          <span>📂</span> Common Directory Scan
-          <span class="subtab-tag">4750 paths</span>
-        </button>
-      </div>
-
-      <!-- ════════════════════════════════════ -->
-      <!--  SUB-TAB A — SENSITIVE FILE SCAN    -->
-      <!-- ════════════════════════════════════ -->
-      <div id="dirpanel-sensitive">
-
-        <!-- Input card -->
+    <!-- MAIN CONTENT -->
+    <main class="main-content">
+        
+        <!-- INPUT CARD -->
         <div class="card input-card">
-          <div class="file-source-row">
-            <div class="file-source-option active" id="src-from-scan" onclick="selectFileSource('scan')">
-              <span class="source-icon">⟳</span>
-              <span>From Last Subdomain Scan</span>
+            <div class="config-header">
+                <div>
+                    <h2 class="config-title">Target Domain or URL Specification</h2>
+                    <p class="config-subtitle">Universal multi-TLD parsing engine. Input raw domains (e.g., <code>srmist.edu.in</code>) or full URLs.</p>
+                </div>
+                <div class="scope-guard-badge">🛡️ Scope Guard: SSRF & Loopback Guard Active</div>
             </div>
-            <div class="file-source-option" id="src-custom" onclick="selectFileSource('custom')">
-              <span class="source-icon">📁</span>
-              <span>Custom File Path</span>
-            </div>
-          </div>
-
-          <div id="src-scan-panel">
-            <div class="alive-file-display" id="alive-file-display">
-              <span class="alive-file-icon">📄</span>
-              <span class="alive-file-path" id="alive-file-path-display">No subdomain scan completed yet</span>
-            </div>
-          </div>
-
-          <div id="src-custom-panel" style="display:none">
-            <label class="input-label" for="custom-alive-path">ALIVE DOMAINS FILE PATH</label>
+            
             <div class="input-row">
-              <div class="input-wrapper" style="flex:1">
-                <span class="input-prefix">📄</span>
-                <input type="text" id="custom-alive-path" class="domain-input"
-                  placeholder="/path/to/alive_subdomains.txt" spellcheck="false" />
-              </div>
+                <div class="input-wrapper">
+                    <span class="input-prefix">https://</span>
+                    <input type="text" id="domain-input" value="testphp.vulnweb.com" placeholder="target.com" class="domain-input">
+                </div>
+                <button class="btn-primary" id="start-full-btn" onclick="startScan('full')">▶ Launch Full Scan</button>
+                <button class="btn-stop hidden" id="stop-scan-btn" onclick="stopActiveScan()">■ Stop</button>
             </div>
-          </div>
 
-          <div style="margin-top:1.2rem">
-            <label class="input-label" for="dir-domain-label">SCAN LABEL (optional)</label>
-            <div class="input-row">
-              <div class="input-wrapper" style="flex:1">
-                <span class="input-prefix">@</span>
-                <input type="text" id="dir-domain-label" class="domain-input"
-                  placeholder="e.g. example.com" spellcheck="false" />
-              </div>
-              <button class="btn-primary btn-primary--orange" id="start-dir-btn" onclick="startDirScan()">
-                <span class="btn-icon">▶</span>
-                <span class="btn-text">Start Sensitive Scan</span>
-              </button>
-              <button class="btn-stop" id="stop-dir-btn" onclick="stopScan('dirscan')" style="display:none">
-                <span class="btn-icon">■</span> Stop
-              </button>
+            <!-- PRESETS ROW (FROM YOUR SCREENSHOT) -->
+            <div class="target-chips-label">QUICK TARGET PRESETS:</div>
+            <div class="tool-chips" style="margin-bottom: 1rem;">
+                <span class="chip chip--highlight" onclick="setPresetDomain('srmist.edu.in')">📍 srmist.edu.in (.edu.in)</span>
+                <span class="chip" onclick="setPresetDomain('https://www.srmist.edu.in')">🌐 https://www.srmist.edu.in (Full URL)</span>
+                <span class="chip" onclick="setPresetDomain('iitd.ac.in')">iitd.ac.in (.ac.in)</span>
+                <span class="chip" onclick="setPresetDomain('du.edu.in')">du.edu.in (.edu.in)</span>
+                <span class="chip" onclick="setPresetDomain('delhi.gov.in')">delhi.gov.in (.gov.in)</span>
+                <span class="chip" onclick="setPresetDomain('mit.edu')">mit.edu (.edu)</span>
             </div>
-          </div>
-
-          <div class="target-chips-label">SENSITIVE PATHS CHECKED:</div>
-          <div class="tool-chips">
-            <span class="chip chip--path">/.env</span>
-            <span class="chip chip--path">/.git/HEAD</span>
-            <span class="chip chip--path">/.svn/entries</span>
-            <span class="chip chip--path">/composer.json</span>
-            <span class="chip chip--path">/package.json</span>
-            <span class="chip chip--path">/config.php</span>
-            <span class="chip chip--path">/wp-config.php</span>
-          </div>
-        </div>
-
-        <div class="stats-row" id="dir-stats-row" style="display:none">
-          <div class="stat-card">
-            <span class="stat-value" id="dir-stat-scanned">0</span>
-            <span class="stat-label">Hosts Audited</span>
-          </div>
-          <div class="stat-card stat-card--red">
-            <span class="stat-value" id="dir-stat-found">0</span>
-            <span class="stat-label">Exposures Found</span>
-          </div>
-          <div class="stat-card">
-            <span class="stat-value" id="dir-stat-elapsed">0s</span>
-            <span class="stat-label">Elapsed</span>
-          </div>
-        </div>
-
-        <div class="card terminal-card" id="dir-terminal-card" style="display:none">
-          <div class="terminal-header">
-            <div class="terminal-dots">
-              <span class="dot dot-red"></span><span class="dot dot-yellow"></span><span class="dot dot-green"></span>
+            <div class="tool-chips" style="margin-bottom: 1rem;">
+                <span class="tld-chip" onclick="appendTLD('.edu.in')">+ .edu.in</span>
+                <span class="tld-chip" onclick="appendTLD('.ac.in')">+ .ac.in</span>
+                <span class="tld-chip" onclick="appendTLD('.gov.in')">+ .gov.in</span>
+                <span class="tld-chip" onclick="appendTLD('.co.in')">+ .co.in</span>
             </div>
-            <span class="terminal-title" id="dir-terminal-title">bash — dir_search.sh</span>
-            <button class="btn-icon-only" onclick="clearTerminal('dir-terminal')" title="Clear">⌫</button>
-          </div>
-          <div class="terminal-body" id="dir-terminal"></div>
-        </div>
 
-        <div class="card results-card" id="dir-results-card" style="display:none">
-          <div class="results-header">
-            <h2 class="results-title">Verified Exposures</h2>
-            <div class="results-actions">
-              <button class="btn-secondary btn-secondary--red" id="btn-dl-findings" onclick="downloadDirFindings()">
-                ↓ Download Report
-              </button>
+            <!-- INDIVIDUAL STAGES (FROM YOUR SCREENSHOT) -->
+            <div class="target-chips-label">OR RUN INDIVIDUAL STAGES:</div>
+            <div class="tool-chips" style="margin-bottom: 1rem;">
+                <button class="btn-module-run" onclick="startScan('subdomain')">🌐 Subdomains Only</button>
+                <button class="btn-module-run" onclick="startScan('associated')">🔗 Associated Roots</button>
+                <button class="btn-module-run" onclick="startScan('ports')">⚡ Open Ports</button>
+                <button class="btn-module-run" onclick="startScan('crawler')">🕸️ Web Crawler</button>
+                <button class="btn-module-run" onclick="startScan('directories')">📁 Directories & Secrets</button>
             </div>
-          </div>
-          <div id="findings-container">
-            <table class="results-table" id="findings-table">
-              <thead><tr><th>#</th><th>Exposed URL</th><th>Type</th><th>Action</th></tr></thead>
-              <tbody id="findings-tbody"></tbody>
-            </table>
-            <div class="no-findings" id="no-findings-msg" style="display:none">
-              <span class="no-findings-icon">✓</span>
-              <span>No verified exposures found — target appears clean.</span>
+
+            <!-- SCANNER OPTIONS (FROM YOUR SCREENSHOT) -->
+            <div class="scope-controls-bar">
+                <div class="scope-ctrl-item">
+                    <label>RATE LIMIT:</label>
+                    <select id="scope-rate" class="scope-select">
+                        <option value="5">Stealth (5 req/s)</option>
+                        <option value="10" selected>Balanced (10 req/s)</option>
+                        <option value="20">Aggressive (20 req/s)</option>
+                    </select>
+                </div>
+                <div class="scope-ctrl-item">
+                    <label>CRAWL DEPTH:</label>
+                    <select id="scope-depth" class="scope-select">
+                        <option value="1">Shallow (Depth 1)</option>
+                        <option value="2" selected>Balanced (Depth 2)</option>
+                        <option value="3">Deep (Depth 3)</option>
+                    </select>
+                </div>
+                <div class="scope-ctrl-item">
+                    <label>PORT PROFILE:</label>
+                    <select id="scope-ports" class="scope-select">
+                        <option value="web" selected>Top Web Ports (10 ports)</option>
+                        <option value="infra">Infrastructure (26 ports)</option>
+                        <option value="all">All Ports (85+ ports)</option>
+                    </select>
+                </div>
+                <div class="scope-ctrl-item">
+                    <label>SAVED SESSIONS:</label>
+                    <select id="session-select" class="scope-select" onchange="loadSavedSession(this.value)">
+                        <option value="">-- Load Past Scan --</option>
+                    </select>
+                </div>
             </div>
-          </div>
+            <div class="scope-auth-note">🔒 Authorized testing mode only. Target RFC 1918 private subnets are automatically rejected.</div>
         </div>
 
-      </div><!-- /dirpanel-sensitive -->
-
-      <!-- ════════════════════════════════════ -->
-      <!--  SUB-TAB B — COMMON DIRECTORY SCAN  -->
-      <!-- ════════════════════════════════════ -->
-      <div id="dirpanel-common" style="display:none">
-
-        <div class="card input-card">
-          <label class="input-label" for="common-target-url">TARGET URL</label>
-          <div class="input-row">
-            <div class="input-wrapper" style="flex:1">
-              <span class="input-prefix" style="color:var(--cyan)">🌐</span>
-              <input
-                type="text"
-                id="common-target-url"
-                class="domain-input"
-                placeholder="https://example.com"
-                autocomplete="off"
-                spellcheck="false"
-              />
+        <!-- PIPELINE STEPPER -->
+        <div class="card pipeline-stepper-card" id="pipeline-stepper-card">
+            <div class="stepper-header">
+                <div class="stepper-status-group">
+                    <span class="stepper-pulse" id="stepper-pulse">●</span>
+                    <span class="stepper-status-text" id="stepper-status-text">Pipeline Status: Ready to Launch</span>
+                </div>
+                <span class="stepper-pct-badge" id="stepper-pct-badge">0% Completed</span>
             </div>
-            <button class="btn-primary" id="start-common-btn" onclick="startCommonDirScan()"
-              style="background:linear-gradient(135deg,#00d4ff,#0090b3);box-shadow:0 4px 15px rgba(0,212,255,0.25)">
-              <span class="btn-icon">▶</span>
-              <span class="btn-text">Start Common Scan</span>
-            </button>
-            <button class="btn-stop" id="stop-common-btn" onclick="stopScan('commondir')" style="display:none">
-              <span class="btn-icon">■</span> Stop
-            </button>
-          </div>
-
-          <div class="target-chips-label">WORDLIST: common.txt (4750 entries)</div>
-          <div class="tool-chips">
-            <span class="chip" style="color:var(--cyan);border-color:rgba(0,212,255,0.3)">/admin</span>
-            <span class="chip" style="color:var(--cyan);border-color:rgba(0,212,255,0.3)">/login</span>
-            <span class="chip" style="color:var(--cyan);border-color:rgba(0,212,255,0.3)">/api</span>
-            <span class="chip" style="color:var(--cyan);border-color:rgba(0,212,255,0.3)">/backup</span>
-            <span class="chip" style="color:var(--cyan);border-color:rgba(0,212,255,0.3)">/config</span>
-            <span class="chip" style="color:var(--cyan);border-color:rgba(0,212,255,0.3)">/dashboard</span>
-            <span class="chip" style="color:var(--cyan);border-color:rgba(0,212,255,0.3)">+4744 more</span>
-          </div>
-        </div>
-
-        <!-- Common scan stats -->
-        <div class="stats-row" id="common-stats-row" style="display:none">
-          <div class="stat-card">
-            <span class="stat-value" id="common-stat-scanned">0</span>
-            <span class="stat-label">Hosts Scanned</span>
-          </div>
-          <div class="stat-card" style="border-color:rgba(0,212,255,0.25);background:rgba(0,212,255,0.04)">
-            <span class="stat-value" id="common-stat-found" style="color:var(--cyan)">0</span>
-            <span class="stat-label">Paths Found</span>
-          </div>
-          <div class="stat-card">
-            <span class="stat-value" id="common-stat-elapsed">0s</span>
-            <span class="stat-label">Elapsed</span>
-          </div>
-        </div>
-
-        <!-- Common terminal -->
-        <div class="card terminal-card" id="common-terminal-card" style="display:none">
-          <div class="terminal-header">
-            <div class="terminal-dots">
-              <span class="dot dot-red"></span><span class="dot dot-yellow"></span><span class="dot dot-green"></span>
+            <div class="stepper-track">
+                <div class="stepper-progress-fill" id="stepper-progress-fill"></div>
             </div>
-            <span class="terminal-title" id="common-terminal-title">bash — common_dir_scan.sh</span>
-            <button class="btn-icon-only" onclick="clearTerminal('common-terminal')" title="Clear">⌫</button>
-          </div>
-          <div class="terminal-body" id="common-terminal"></div>
-        </div>
-
-        <!-- Common results -->
-        <div class="card results-card" id="common-results-card" style="display:none">
-          <div class="results-header">
-            <h2 class="results-title">Common Directories Found</h2>
-            <div class="results-actions">
-              <button class="btn-secondary" id="btn-dl-common"
-                style="color:var(--cyan);border-color:rgba(0,212,255,0.3)"
-                onclick="downloadCommonFindings()">
-                ↓ Download Report
-              </button>
+            <div class="stepper-steps">
+                <div class="step-node" id="step-node-1"><div class="step-indicator">1</div><div class="step-label">Scope Guard</div></div>
+                <div class="step-node" id="step-node-2"><div class="step-indicator">2</div><div class="step-label">Associated Roots</div></div>
+                <div class="step-node" id="step-node-3"><div class="step-indicator">3</div><div class="step-label">Subdomains & DNS</div></div>
+                <div class="step-node" id="step-node-4"><div class="step-indicator">4</div><div class="step-label">Open Ports</div></div>
+                <div class="step-node" id="step-node-5"><div class="step-indicator">5</div><div class="step-label">Web Crawler</div></div>
+                <div class="step-node" id="step-node-6"><div class="step-indicator">6</div><div class="step-label">Dir & Secrets</div></div>
             </div>
-          </div>
-          <div id="common-findings-container">
-            <table class="results-table" id="common-findings-table">
-              <thead>
-                <tr>
-                  <th>#</th>
-                  <th>URL</th>
-                  <th>HTTP Code</th>
-                  <th>Action</th>
-                </tr>
-              </thead>
-              <tbody id="common-findings-tbody"></tbody>
-            </table>
-            <div class="no-findings" id="common-no-findings-msg" style="display:none">
-              <span class="no-findings-icon">✓</span>
-              <span>No common directories found.</span>
+        </div>
+
+        <!-- METHODOLOGY GUIDE -->
+        <div class="card guide-card">
+            <div class="guide-header" onclick="toggleGuide()">
+                <div class="guide-title-row">
+                    <span class="guide-icon">📘</span>
+                    <div>
+                        <div class="guide-title">Reconnaissance Methodology & Architecture Guide</div>
+                        <div class="guide-subtitle">Understand exactly what the pipeline executes at each phase, why it matters, and how to audit.</div>
+                    </div>
+                </div>
+                <button class="btn-icon" id="guide-toggle-btn">▼</button>
             </div>
-          </div>
-        </div>
-
-      </div><!-- /dirpanel-common -->
-
-    </section>
-
-    <!-- ══════════════════════════════════ -->
-    <!--  MODULE 3 — GIT-DUMPER             -->
-    <!-- ══════════════════════════════════ -->
-    <section class="module hidden" id="module-gitdump">
-
-      <div class="module-header">
-        <div class="module-title-group">
-          <h1 class="module-title">Git-Dumper</h1>
-          <p class="module-subtitle">Extract an exposed .git repository from a confirmed finding — one target at a time</p>
-        </div>
-        <div class="module-badge" id="gitdump-badge">READY</div>
-      </div>
-
-      <div class="auth-banner" id="gitdump-availability-banner" style="display:none"></div>
-
-      <div class="auth-banner auth-banner--info">
-        ⎋ Every dump here is a manual, per-target action. Findings are never dumped automatically —
-        you pick one below, confirm you're authorized to test it, then run it yourself.
-      </div>
-
-      <!-- Detected findings -->
-      <div class="card">
-        <div class="results-header">
-          <h2 class="results-title">Detected /.git/HEAD Exposures</h2>
-        </div>
-        <div id="gitdump-findings-list" class="gitdump-findings-list"></div>
-        <div class="no-findings" id="gitdump-no-findings">
-          <span class="no-findings-icon">·</span>
-          <span>No /.git/HEAD exposures yet — run a Sensitive File Scan on the Directory Scanner tab, or add a target manually below.</span>
-        </div>
-
-        <div class="target-chips-label" style="margin-top:1.4rem">ADD TARGET MANUALLY</div>
-        <div class="input-row">
-          <div class="input-wrapper" style="flex:1">
-            <span class="input-prefix">⎋</span>
-            <input type="text" id="gitdump-custom-url" class="domain-input"
-              placeholder="https://target.example/.git/HEAD" spellcheck="false" />
-          </div>
-          <button class="btn-secondary" onclick="addCustomGitDumpTarget()">+ Add</button>
-        </div>
-      </div>
-
-      <!-- Confirm & run -->
-      <div class="card" id="gitdump-confirm-card" style="display:none">
-        <div class="results-header">
-          <h2 class="results-title">Confirm &amp; Run</h2>
-        </div>
-
-        <div class="target-chips-label">SELECTED TARGET</div>
-        <div class="alive-file-display">
-          <span class="alive-file-icon">⎋</span>
-          <span class="alive-file-path" id="gitdump-target-display">—</span>
-        </div>
-
-        <div style="margin-top:1rem">
-          <label class="input-label" for="gitdump-label-input">DUMP FOLDER LABEL (optional)</label>
-          <div class="input-row">
-            <div class="input-wrapper" style="flex:1">
-              <span class="input-prefix">@</span>
-              <input type="text" id="gitdump-label-input" class="domain-input"
-                placeholder="defaults to the hostname" spellcheck="false" />
+            <div class="guide-body" id="guide-body" style="display: none;">
+                <div class="guide-grid">
+                    <div class="guide-item"><div class="guide-phase-tag">PHASE 1</div><h4>Scope Guard & SSRF</h4><p>Validates target syntax and blocks loopback/metadata IPs.</p></div>
+                    <div class="guide-item"><div class="guide-phase-tag">PHASE 2</div><h4>Associated Roots</h4><p>Extracts sibling domains via TLS SANs and CT logs.</p></div>
+                    <div class="guide-item"><div class="guide-phase-tag">PHASE 3</div><h4>Subdomains</h4><p>Passive OSINT aggregation and active HTTP probing.</p></div>
+                    <div class="guide-item"><div class="guide-phase-tag">PHASE 4</div><h4>Open Ports</h4><p>Concurrent TCP scanning with TLS-aware banner grabbing.</p></div>
+                    <div class="guide-item"><div class="guide-phase-tag">PHASE 5</div><h4>Crawler</h4><p>Spiders in-scope DOM, extracts APIs, and hunts JS secrets.</p></div>
+                    <div class="guide-item"><div class="guide-phase-tag">PHASE 6</div><h4>Directory Audit</h4><p>Fuzzes common paths and verifies sensitive file structures.</p></div>
+                </div>
             </div>
-          </div>
         </div>
 
-        <div class="gitdump-preview">
-          <div class="gitdump-preview-row">
-            <span class="gitdump-preview-label">Command</span>
-            <code class="gitdump-preview-value" id="gitdump-command-preview">—</code>
-          </div>
-          <div class="gitdump-preview-row">
-            <span class="gitdump-preview-label">Saves to</span>
-            <code class="gitdump-preview-value" id="gitdump-path-preview">—</code>
-          </div>
-          <div class="gitdump-preview-hint" id="gitdump-venv-hint"></div>
+        <!-- KPI STATS -->
+        <div class="stats-row">
+            <div class="stat-card"><div class="stat-value" id="stat-subdomains">0</div><div class="stat-label">Subdomains</div></div>
+            <div class="stat-card stat-card--alive"><div class="stat-value" id="stat-alive">0</div><div class="stat-label">Alive Hosts</div></div>
+            <div class="stat-card"><div class="stat-value" id="stat-ports">0</div><div class="stat-label">Open Ports</div></div>
+            <div class="stat-card"><div class="stat-value" id="stat-pages">0</div><div class="stat-label">Crawled Pages</div></div>
+            <div class="stat-card stat-card--red"><div class="stat-value" id="stat-exposures">0</div><div class="stat-label">Secret Leaks</div></div>
         </div>
 
-        <label class="auth-checkbox-row" for="gitdump-authorized-checkbox">
-          <input type="checkbox" id="gitdump-authorized-checkbox" />
-          <span>I confirm I am authorized to test this specific target and extract its repository data.</span>
-        </label>
+        <!-- ================= MODULES ================= -->
 
-        <div class="input-row" style="margin-top:1rem">
-          <button class="btn-primary" id="start-gitdump-btn" onclick="startGitDump()" disabled
-            style="background:linear-gradient(135deg,#ff4466,#c22e48);box-shadow:0 4px 15px rgba(255,68,102,0.25)">
-            <span class="btn-icon">⎋</span>
-            <span class="btn-text">Run Dump</span>
-          </button>
-          <button class="btn-stop" id="stop-gitdump-btn" onclick="stopScan('gitdump')" style="display:none">
-            <span class="btn-icon">■</span> Stop
-          </button>
+        <!-- RECON TERMINAL -->
+        <div class="module" id="module-recon">
+            <div class="card terminal-card">
+                <div class="terminal-header">
+                    <div class="terminal-dots"><span class="dot-red"></span><span class="dot-yellow"></span><span class="dot-green"></span></div>
+                    <div class="terminal-title" id="terminal-title">FULL PIPELINE — Awaiting Target</div>
+                    <button class="btn-icon" onclick="clearTerminal()">Clear</button>
+                </div>
+                <div class="terminal-body" id="recon-terminal">
+                    <div class="t-line"><span class="t-prefix">›</span><span class="t-text info">System initialized. Awaiting target input.</span></div>
+                </div>
+            </div>
+            
+            <div class="card export-bar hidden" id="export-bar">
+                <div class="export-info">🛡️ Executive Report &amp; Artifacts Ready</div>
+                <div class="export-buttons">
+                    <button class="btn-secondary" onclick="openPrintableReport()">🖨️ View HTML Report</button>
+                    <button class="btn-secondary" onclick="exportReport('json')">📊 JSON</button>
+                    <button class="btn-secondary" onclick="exportReport('md')">📝 Markdown</button>
+                    <button class="btn-secondary" onclick="exportReport('txt')">📄 TXT</button>
+                </div>
+            </div>
+
+            <div class="card risk-posture-card hidden" id="risk-posture-card">
+                <div class="risk-posture-header">
+                    <div>
+                        <div class="card-heading" style="margin-bottom:2px;">🛡️ Automated Risk Posture &amp; Remediation</div>
+                        <div style="font-size:0.8rem;color:var(--text-dim);" id="risk-posture-subtitle">Attack surface evaluation based on discovered exposures, open ports, and transport security.</div>
+                    </div>
+                    <div class="risk-score-pill" id="risk-score-pill">LOW (10/100)</div>
+                </div>
+                <div id="risk-recs-list"></div>
+            </div>
+
+            <!-- OVERVIEW CARDS (Bottom of Recon) -->
+            <div class="overview-grid" style="margin-top: 1rem;">
+                <div class="card overview-card">
+                    <div class="card-heading">🌐 Subdomain Pool</div>
+                    <div class="overview-preview-list" id="overview-sub-list">No data</div>
+                    <button class="btn-link" onclick="switchTab('subdomains')">View Details →</button>
+                </div>
+                <div class="card overview-card">
+                    <div class="card-heading">🔗 Associated Domains</div>
+                    <div class="overview-preview-list" id="overview-assoc-list">No data</div>
+                    <button class="btn-link" onclick="switchTab('associated')">View Details →</button>
+                </div>
+                <div class="card overview-card">
+                    <div class="card-heading">⚡ Open Services & Ports</div>
+                    <div class="overview-preview-list" id="overview-port-list">No data</div>
+                    <button class="btn-link" onclick="switchTab('ports')">View Details →</button>
+                </div>
+                <div class="card overview-card">
+                    <div class="card-heading">🚨 Sensitive Exposures</div>
+                    <div class="overview-preview-list" id="overview-exp-list">No data</div>
+                    <button class="btn-link" onclick="switchTab('exposures')">View Details →</button>
+                </div>
+            </div>
         </div>
-      </div>
 
-      <!-- Stats -->
-      <div class="stats-row" id="gitdump-stats-row" style="display:none">
-        <div class="stat-card stat-card--red">
-          <span class="stat-value" id="gitdump-stat-files">0</span>
-          <span class="stat-label">Files Retrieved</span>
+        <!-- SUBDOMAINS -->
+        <div class="module hidden" id="module-subdomains">
+            <div class="card">
+                <div class="results-header">
+                    <h2 class="results-title">Discovered Subdomains</h2>
+                    <div class="results-controls">
+                        <input type="text" id="subdomain-search-input" class="search-filter-input" placeholder="Filter host, IP, WAF..." oninput="if(state.reconResults) renderSubdomainsTable(state.reconResults.subdomains)">
+                        <div class="tabs-inner">
+                            <button class="inner-tab active" id="itab-alive" onclick="filterSubTab('alive')">Alive Only</button>
+                            <button class="inner-tab" id="itab-all" onclick="filterSubTab('all')">All Discovered</button>
+                        </div>
+                    </div>
+                </div>
+                <div class="table-container">
+                    <table class="results-table">
+                        <thead><tr><th>#</th><th>Subdomain</th><th>IP Address</th><th>Status</th><th>Page Title</th><th>Server &amp; WAF</th><th>Sec Headers</th><th>Action</th></tr></thead>
+                        <tbody id="subdomains-tbody"><tr><td colspan="8" class="table-empty">No scan data yet.</td></tr></tbody>
+                    </table>
+                </div>
+            </div>
         </div>
-        <div class="stat-card">
-          <span class="stat-value" id="gitdump-stat-elapsed">0s</span>
-          <span class="stat-label">Elapsed</span>
+
+        <!-- ASSOCIATED -->
+        <div class="module hidden" id="module-associated">
+            <div class="card">
+                <h2 class="results-title">Associated Root Domains</h2>
+                <div class="associated-grid" id="associated-cards-container">
+                    <div class="table-empty">No associated roots found.</div>
+                </div>
+            </div>
         </div>
-      </div>
 
-      <!-- Terminal -->
-      <div class="card terminal-card" id="gitdump-terminal-card" style="display:none">
-        <div class="terminal-header">
-          <div class="terminal-dots">
-            <span class="dot dot-red"></span><span class="dot dot-yellow"></span><span class="dot dot-green"></span>
-          </div>
-          <span class="terminal-title">bash — git-dumper</span>
-          <button class="btn-icon-only" onclick="clearTerminal('gitdump-terminal')" title="Clear">⌫</button>
+        <!-- PORTS -->
+        <div class="module hidden" id="module-ports">
+            <div class="card">
+                <h2 class="results-title">Open Ports & Services</h2>
+                <div class="table-container">
+                    <table class="results-table">
+                        <thead><tr><th>#</th><th>Host</th><th>Port</th><th>Protocol</th><th>Service</th><th>Banner / Header</th></tr></thead>
+                        <tbody id="ports-tbody"><tr><td colspan="6" class="table-empty">No scan data yet.</td></tr></tbody>
+                    </table>
+                </div>
+            </div>
         </div>
-        <div class="terminal-body" id="gitdump-terminal"></div>
-      </div>
 
-      <!-- Results -->
-      <div class="card results-card" id="gitdump-results-card" style="display:none">
-        <div class="results-header">
-          <h2 class="results-title">Dump Complete</h2>
-          <div class="results-actions">
-            <button class="btn-secondary btn-secondary--red" onclick="copyGitDumpPath()">
-              ⧉ Copy Path
-            </button>
-          </div>
+        <!-- CRAWLER -->
+        <div class="module hidden" id="module-crawler">
+            <div class="card">
+                <div class="results-header">
+                    <h2 class="results-title">Crawled Routes & APIs</h2>
+                    <div class="tabs-inner">
+                        <button class="inner-tab active" id="ctab-pages" onclick="switchCrawlerTab('pages')">Pages</button>
+                        <button class="inner-tab" id="ctab-api" onclick="switchCrawlerTab('api')">APIs</button>
+                        <button class="inner-tab" id="ctab-scripts" onclick="switchCrawlerTab('scripts')">JavaScript</button>
+                    </div>
+                </div>
+                <div class="table-container" id="cpanel-pages">
+                    <table class="results-table">
+                        <thead><tr><th>#</th><th>URL</th><th>Status</th><th>Depth</th></tr></thead>
+                        <tbody id="crawler-pages-tbody"><tr><td colspan="4" class="table-empty">No pages crawled.</td></tr></tbody>
+                    </table>
+                </div>
+                <div class="table-container hidden" id="cpanel-api">
+                    <table class="results-table">
+                        <thead><tr><th>#</th><th>API Endpoint</th><th>Action</th></tr></thead>
+                        <tbody id="crawler-api-tbody"><tr><td colspan="3" class="table-empty">No APIs discovered.</td></tr></tbody>
+                    </table>
+                </div>
+                <div class="table-container hidden" id="cpanel-scripts">
+                    <table class="results-table">
+                        <thead><tr><th>#</th><th>JavaScript File</th><th>Action</th></tr></thead>
+                        <tbody id="crawler-scripts-tbody"><tr><td colspan="3" class="table-empty">No scripts discovered.</td></tr></tbody>
+                    </table>
+                </div>
+            </div>
         </div>
-        <div class="gitdump-preview">
-          <div class="gitdump-preview-row">
-            <span class="gitdump-preview-label">Target</span>
-            <code class="gitdump-preview-value" id="gitdump-result-target">—</code>
-          </div>
-          <div class="gitdump-preview-row">
-            <span class="gitdump-preview-label">Saved to</span>
-            <code class="gitdump-preview-value" id="gitdump-result-path">—</code>
-          </div>
-          <div class="gitdump-preview-row">
-            <span class="gitdump-preview-label">Files</span>
-            <code class="gitdump-preview-value" id="gitdump-result-count">0</code>
-          </div>
+
+        <!-- EXPOSURES -->
+        <div class="module hidden" id="module-exposures">
+            <div class="card">
+                <h2 class="results-title text-red">Critical Exposures & Leaks</h2>
+                <div class="table-container border-red">
+                    <table class="results-table">
+                        <thead><tr><th>#</th><th>Target URL</th><th>Type</th><th>Status / Secret</th><th>Size</th><th>Action</th></tr></thead>
+                        <tbody id="sensitive-tbody"><tr><td colspan="6" class="table-empty text-green">✓ No sensitive exposures found.</td></tr></tbody>
+                    </table>
+                </div>
+            </div>
+            <div class="card" style="margin-top: 1.5rem;">
+                <h2 class="results-title">Discovered Directories</h2>
+                <div class="table-container">
+                    <table class="results-table">
+                        <thead><tr><th>#</th><th>Directory URL</th><th>Status</th><th>Size</th><th>Action</th></tr></thead>
+                        <tbody id="directories-tbody"><tr><td colspan="5" class="table-empty">No directories found.</td></tr></tbody>
+                    </table>
+                </div>
+            </div>
         </div>
-      </div>
 
-    </section>
+        <!-- GIT DUMPER -->
+        <div class="module hidden" id="module-gitdump">
+            <div class="card">
+                <h2 class="results-title">Authorized Git Extraction</h2>
+                <p class="section-desc">Executes <code>git-dumper</code> against a verified <code>/.git/HEAD</code> exposure.</p>
+                <div class="input-row" style="margin-top: 1rem;">
+                    <div class="input-wrapper">
+                        <input type="text" id="gitdump-custom-url" placeholder="https://target.com/.git/HEAD" class="domain-input">
+                    </div>
+                    <button class="btn-secondary" onclick="addCustomGitDumpTarget()">Add Target</button>
+                </div>
+                <div id="gitdump-findings-list" style="margin-top: 1rem;"></div>
+                <div class="auth-checkbox-row hidden" id="gitdump-confirm-card">
+                    <label>
+                        <input type="checkbox" id="gitdump-authorized-checkbox" onclick="toggleGitDumpBtn()">
+                        I confirm I am legally authorized to extract this repository.
+                    </label>
+                    <button class="btn-primary btn-primary--orange" id="start-gitdump-btn" disabled onclick="startGitDump()">Start Extraction</button>
+                </div>
+            </div>
+        </div>
 
-  </main>
-
-  <!-- ── SESSION HISTORY SIDEBAR TOGGLE ── -->
-  <button class="history-toggle" id="history-toggle" onclick="toggleHistory()">
-    ◧ Sessions
-  </button>
-
-  <aside class="history-panel" id="history-panel">
-    <div class="history-header">
-      <span>Scan History</span>
-      <button class="btn-icon-only" onclick="toggleHistory()">✕</button>
-    </div>
-    <div class="history-list" id="history-list">
-      <div class="history-empty">No scans yet</div>
-    </div>
-  </aside>
-
-  <!-- ── TOAST NOTIFICATIONS ── -->
-  <div class="toast-container" id="toast-container"></div>
-
-  <script src="/static/js/app.js"></script>
+    </main>
+    
+    <div id="toast-container" class="toast-container"></div>
+    <script src="/static/js/app.js"></script>
 </body>
 </html>

@@ -1,1324 +1,685 @@
-/* =========================================================
-   VAPT Scanner — Frontend Logic (app.js)
-   ========================================================= */
-
-// ─── State ───────────────────────────────────────────────
 const state = {
-  activeTab: 'subdomain',
-  subdomainJob: null,      // { id, domain, startTime, sse }
-  dirJob: null,            // { id, domain, startTime, sse }
-  aliveFile: null,         // path from last subdomain scan
-  aliveFileDomain: null,
-  subResults: { alive: [], all: [] },
-  dirResults: { findings: [] },
-  subElapsedTimer: null,
-  dirElapsedTimer: null,
+  activeTab: 'recon',
+  activeSubTab: 'alive',
+  currentJob: null,
+  reconResults: null,
+  elapsedTimer: null,
+  gitdumpFindings: [],
+  gitdumpSelected: null,
 };
 
-// ─── Tab Switching ────────────────────────────────────────
 function switchTab(tab) {
+  if (tab === 'subdomain') tab = 'subdomains';
+  if (tab === 'dirscan') tab = 'exposures';
   state.activeTab = tab;
-  document.getElementById('module-subdomain').classList.toggle('hidden', tab !== 'subdomain');
-  document.getElementById('module-dirscan').classList.toggle('hidden', tab !== 'dirscan');
-  document.getElementById('tab-subdomain').classList.toggle('active', tab === 'subdomain');
-  document.getElementById('tab-dirscan').classList.toggle('active', tab === 'dirscan');
+  const modules = ['recon', 'subdomains', 'associated', 'ports', 'crawler', 'exposures', 'gitdump'];
+  modules.forEach(m => {
+    const el = document.getElementById(`module-${m}`);
+    const btn = document.getElementById(`tab-${m}`);
+    if (el) el.classList.toggle('hidden', m !== tab);
+    if (btn) btn.classList.toggle('active', m === tab);
+  });
 }
 
-// ─── Toast ────────────────────────────────────────────────
+function toggleGuide() {
+  const body = document.getElementById('guide-body');
+  const btn = document.getElementById('guide-toggle-btn');
+  if (!body) return;
+  const isHidden = body.style.display === 'none' || !body.style.display;
+  body.style.display = isHidden ? 'block' : 'none';
+  if (btn) btn.textContent = isHidden ? '▲' : '▼';
+}
+
+function openPrintableReport() {
+  if (!state.currentJob || !state.currentJob.id) {
+    toast('No completed scan session found. Run a scan first.', true);
+    return;
+  }
+  window.open(`/api/jobs/${state.currentJob.id}/report/html`, '_blank');
+}
+
+function exportReport(fmt) {
+  if (!state.currentJob || !state.currentJob.id) {
+    toast('No completed scan session to export.', true);
+    return;
+  }
+  window.open(`/api/jobs/${state.currentJob.id}/export?format=${fmt}`, '_blank');
+}
+
+function filterSubTab(tab) {
+  state.activeSubTab = tab;
+  const aliveBtn = document.getElementById('itab-alive');
+  const allBtn = document.getElementById('itab-all');
+  if (aliveBtn) aliveBtn.classList.toggle('active', tab === 'alive');
+  if (allBtn) allBtn.classList.toggle('active', tab === 'all');
+  if (state.reconResults) renderSubdomainsTable(state.reconResults.subdomains);
+}
+
+function switchCrawlerTab(tab) {
+  ['pages', 'api', 'scripts'].forEach(st => {
+    const btn = document.getElementById('ctab-' + st);
+    const panel = document.getElementById('cpanel-' + st);
+    if (btn) btn.classList.toggle('active', st === tab);
+    if (panel) panel.classList.toggle('hidden', st !== tab);
+  });
+}
+
+function setPresetDomain(domain) {
+  const input = document.getElementById('domain-input');
+  if (input) {
+    input.value = domain;
+    input.focus();
+    toast(`Target preset: ${domain}`);
+  }
+}
+
+function appendTLD(tld) {
+  const input = document.getElementById('domain-input');
+  if (!input) return;
+  let val = input.value.trim();
+  if (!val) {
+    input.value = 'target' + tld;
+  } else {
+    let host = val.replace(/^https?:\/\//i, '').split('/')[0];
+    input.value = host.split('.')[0] + tld;
+  }
+  input.focus();
+}
+
 function toast(msg, isErr = false) {
   const c = document.getElementById('toast-container');
+  if (!c) return;
   const t = document.createElement('div');
   t.className = 'toast' + (isErr ? ' toast-err' : '');
   t.textContent = msg;
   c.appendChild(t);
-  setTimeout(() => t.remove(), 3500);
+  setTimeout(() => t.remove(), 4000);
 }
 
-// ─── Terminal helpers ─────────────────────────────────────
-function termAppend(termId, text) {
-  const el = document.getElementById(termId);
-  if (!el) return;
+function escapeHtml(str) {
+  return String(str ?? '')
+    .replace(/&/g, '&amp;')
+    .replace(/</g, '&lt;')
+    .replace(/>/g, '&gt;')
+    .replace(/"/g, '&quot;');
+}
 
-  // Remove cursor from last line
+function termAppend(text) {
+  const el = document.getElementById('recon-terminal');
+  if (!el) return;
   const last = el.querySelector('.cursor-blink');
   if (last) last.classList.remove('cursor-blink');
 
   const div = document.createElement('div');
   div.className = 't-line';
+  let cls = 'info';
+  if (text.includes('[✓]') || text.includes('[OK]') || text.startsWith('[+]')) cls = 'ok';
+  if (text.includes('[EXPOSED]') || text.includes('SECRET')) cls = 'exposed';
+  if (text.startsWith('[!]')) cls = 'warn';
+  if (text.toLowerCase().includes('error')) cls = 'err';
 
-  const prefix = document.createElement('span');
-  prefix.className = 't-prefix';
-  prefix.textContent = '›';
-
-  const span = document.createElement('span');
-  span.className = 't-text ' + classifyLine(text);
-  span.textContent = text;
-  span.classList.add('cursor-blink');
-
-  div.appendChild(prefix);
-  div.appendChild(span);
+  div.innerHTML = `<span class="t-prefix">›</span><span class="t-text ${cls} cursor-blink">${escapeHtml(text)}</span>`;
   el.appendChild(div);
   el.scrollTop = el.scrollHeight;
 }
 
-function classifyLine(line) {
-  if (line.includes('[✓]') || line.startsWith('[+]')) return 'ok';
-  if (line.startsWith('[!]')) return 'warn';
-  if (line.startsWith('[ERROR]') || line.includes('error')) return 'err';
-  if (line.startsWith('[*]')) return 'info';
-  if (line.includes('EXPOSED')) return 'exposed';
-  return '';
-}
-
-function clearTerminal(termId) {
-  const el = document.getElementById(termId);
+function clearTerminal() {
+  const el = document.getElementById('recon-terminal');
   if (el) el.innerHTML = '';
 }
 
-function removeCursor(termId) {
-  const el = document.getElementById(termId);
-  if (!el) return;
-  el.querySelectorAll('.cursor-blink').forEach(e => e.classList.remove('cursor-blink'));
-}
+function updateStepper(currentPhase, statusText, pct) {
+  const fill = document.getElementById('stepper-progress-fill');
+  const badge = document.getElementById('stepper-pct-badge');
+  const status = document.getElementById('stepper-status-text');
+  if (fill) fill.style.width = `${pct}%`;
+  if (badge) badge.textContent = `${pct}% Completed`;
+  if (status && statusText) status.textContent = statusText;
 
-// ─── Elapsed Timer ────────────────────────────────────────
-function startElapsed(timerKey, statId) {
-  if (state[timerKey]) clearInterval(state[timerKey]);
-  const start = Date.now();
-  state[timerKey] = setInterval(() => {
-    const s = Math.floor((Date.now() - start) / 1000);
-    const el = document.getElementById(statId);
-    if (el) el.textContent = s < 60 ? `${s}s` : `${Math.floor(s/60)}m${s%60}s`;
-  }, 1000);
-}
-
-function stopElapsed(timerKey) {
-  if (state[timerKey]) { clearInterval(state[timerKey]); state[timerKey] = null; }
-}
-
-// ─── Chip animation helpers ───────────────────────────────
-const TOOL_CHIPS = ['subfinder','assetfinder','amass','chaos','github','certspotter','anubis'];
-const CHIP_KEYWORDS = {
-  subfinder:    ['Subfinder'],
-  assetfinder:  ['Assetfinder'],
-  amass:        ['Amass'],
-  chaos:        ['Chaos'],
-  github:       ['GitHub'],
-  certspotter:  ['certspotter','CertSpotter'],
-  anubis:       ['Anubis','anubis'],
-};
-
-function resetChips() {
-  TOOL_CHIPS.forEach(id => {
-    const el = document.getElementById('chip-' + id);
-    if (el) el.className = 'chip';
-  });
-}
-
-function updateChipsFromLine(line) {
-  TOOL_CHIPS.forEach(id => {
-    const el = document.getElementById('chip-' + id);
-    if (!el) return;
-    const keywords = CHIP_KEYWORDS[id];
-    if (keywords.some(k => line.includes(k))) {
-      if (line.startsWith('[*]')) el.className = 'chip running';
-      else if (line.startsWith('[+]')) el.className = 'chip done';
-      else if (line.startsWith('[!]')) el.className = 'chip skipped';
+  for (let i = 1; i <= 6; i++) {
+    const node = document.getElementById(`step-node-${i}`);
+    if (!node) continue;
+    if (pct >= 100) {
+      node.classList.remove('active');
+      node.classList.add('completed');
+    } else if (i < currentPhase) {
+      node.classList.remove('active');
+      node.classList.add('completed');
+    } else if (i === currentPhase) {
+      node.classList.add('active');
+      node.classList.remove('completed');
+    } else {
+      node.classList.remove('active', 'completed');
     }
-  });
+  }
 }
 
-// ─── ═══════════════════════════════════════
-//     SUBDOMAIN SCANNER
-// ═════════════════════════════════════════
-function startSubdomainScan() {
-  const domain = document.getElementById('domain-input').value.trim().toLowerCase();
-  if (!domain) { toast('Please enter a domain', true); return; }
-  if (state.subdomainJob && state.subdomainJob.status === 'running') {
-    toast('A scan is already running', true); return;
+function startScan(scanType) {
+  const inputEl = document.getElementById('domain-input');
+  const domain = inputEl ? inputEl.value.trim() : '';
+  if (!domain) return toast('Enter a target domain', true);
+
+  if (state.currentJob && state.currentJob.sse) {
+    state.currentJob.sse.close();
   }
 
-  // Reset UI
-  resetChips();
-  clearTerminal('sub-terminal');
-  
-  // Hide Map, show Terminal
-  const mapCard = document.getElementById('sub-map-card');
-  if (mapCard) mapCard.style.display = 'none';
+  clearTerminal();
+  termAppend(`[*] Target: ${domain}`);
+  updateStepper(1, 'Initializing Pipeline...', 5);
 
-  document.getElementById('sub-terminal-card').style.display = 'block';
-  document.getElementById('sub-stats-row').style.display = 'grid';
-  document.getElementById('sub-results-card').style.display = 'none';
-  document.getElementById('stat-total').textContent = '0';
-  document.getElementById('stat-alive').textContent = '0';
-  document.getElementById('stat-elapsed').textContent = '0s';
-  document.getElementById('sub-terminal-title').textContent = `bash — subdomain_finder.sh ${domain}`;
-  document.getElementById('sub-badge').textContent = 'RUNNING';
-  document.getElementById('sub-badge').className = 'module-badge module-badge--running';
-  document.getElementById('start-sub-btn').disabled = true;
-  document.getElementById('stop-sub-btn').style.display = 'flex';
+  const titleEl = document.getElementById('terminal-title');
+  if (titleEl) titleEl.textContent = `${scanType.toUpperCase()} — ${domain}`;
 
-  startElapsed('subElapsedTimer', 'stat-elapsed');
-  termAppend('sub-terminal', `[*] Initiating subdomain enumeration for: ${domain}`);
+  document.getElementById('start-full-btn').disabled = true;
+  document.querySelectorAll('.btn-module-run').forEach(b => (b.disabled = true));
+  document.getElementById('stop-scan-btn').classList.remove('hidden');
+  document.getElementById('server-label').textContent = 'Scanning';
+  document.getElementById('export-bar').classList.add('hidden');
 
-  fetch('/api/scan/subdomains', {
+  ['subdomains', 'alive', 'ports', 'pages', 'exposures'].forEach(id => {
+    const el = document.getElementById(`stat-${id}`);
+    if (el) el.textContent = '0';
+  });
+
+  const rate = document.getElementById('scope-rate')?.value || '10';
+  const depth = document.getElementById('scope-depth')?.value || '2';
+  const ports = document.getElementById('scope-ports')?.value || 'web';
+
+  const endpointMap = {
+    full: '/api/scan/full',
+    subdomain: '/api/scan/subdomains',
+    subdomains: '/api/scan/subdomains',
+    associated: '/api/scan/associated',
+    ports: '/api/scan/ports',
+    crawler: '/api/scan/crawler',
+    directories: '/api/scan/directories',
+  };
+  const endpoint = endpointMap[scanType] || `/api/scan/${scanType}`;
+
+  fetch(endpoint, {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({ domain }),
+    body: JSON.stringify({ domain, options: { rate_limit: rate, max_depth: depth, port_profile: ports } }),
   })
-  .then(r => r.json())
-  .then(data => {
-    if (data.error) { toast(data.error, true); resetSubBtn(); return; }
-    state.subdomainJob = { id: data.job_id, domain, status: 'running' };
-    streamJob(data.job_id, 'subdomain');
-    refreshHistory();
-  })
-  .catch(e => { toast('Failed to start scan: ' + e.message, true); resetSubBtn(); });
-}
-
-function resetSubBtn() {
-  document.getElementById('start-sub-btn').disabled = false;
-  document.getElementById('stop-sub-btn').style.display = 'none';
-  document.getElementById('sub-badge').textContent = 'READY';
-  document.getElementById('sub-badge').className = 'module-badge';
-  stopElapsed('subElapsedTimer');
-}
-
-// ─── ═══════════════════════════════════════
-//     DIRECTORY SCANNER
-// ═════════════════════════════════════════
-let fileSource = 'scan';
-
-function selectFileSource(src) {
-  fileSource = src;
-  document.getElementById('src-from-scan').classList.toggle('active', src === 'scan');
-  document.getElementById('src-custom').classList.toggle('active', src === 'custom');
-  document.getElementById('src-scan-panel').style.display = src === 'scan' ? 'block' : 'none';
-  document.getElementById('src-custom-panel').style.display = src === 'custom' ? 'block' : 'none';
-}
-
-function startDirScan() {
-  let aliveFile = '';
-  let domain = document.getElementById('dir-domain-label').value.trim() || 'unknown';
-
-  if (fileSource === 'scan') {
-    if (!state.aliveFile) { toast('No subdomain scan completed yet. Run subdomain scanner first.', true); return; }
-    aliveFile = state.aliveFile;
-    if (!domain || domain === 'unknown') domain = state.aliveFileDomain || 'unknown';
-  } else {
-    aliveFile = document.getElementById('custom-alive-path').value.trim();
-    if (!aliveFile) { toast('Please enter the path to alive_subdomains.txt', true); return; }
-  }
-
-  if (state.dirJob && state.dirJob.status === 'running') {
-    toast('A directory scan is already running', true); return;
-  }
-
-  // Reset UI
-  clearTerminal('dir-terminal');
-  document.getElementById('dir-terminal-card').style.display = 'block';
-  document.getElementById('dir-stats-row').style.display = 'grid';
-  document.getElementById('dir-results-card').style.display = 'none';
-  document.getElementById('dir-stat-scanned').textContent = '0';
-  document.getElementById('dir-stat-found').textContent = '0';
-  document.getElementById('dir-stat-elapsed').textContent = '0s';
-  document.getElementById('dir-terminal-title').textContent = `bash — dir_search.sh`;
-  document.getElementById('dir-badge').textContent = 'RUNNING';
-  document.getElementById('dir-badge').className = 'module-badge module-badge--running module-badge--orange';
-  document.getElementById('start-dir-btn').disabled = true;
-  document.getElementById('stop-dir-btn').style.display = 'flex';
-
-  startElapsed('dirElapsedTimer', 'dir-stat-elapsed');
-  termAppend('dir-terminal', `[*] Starting directory scan using: ${aliveFile}`);
-
-  fetch('/api/scan/directories', {
-    method: 'POST',
-    headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({ alive_file: aliveFile, domain }),
-  })
-  .then(r => r.json())
-  .then(data => {
-    if (data.error) { toast(data.error, true); resetDirBtn(); return; }
-    state.dirJob = { id: data.job_id, domain, status: 'running' };
-    streamJob(data.job_id, 'dirscan');
-    refreshHistory();
-  })
-  .catch(e => { toast('Failed to start scan: ' + e.message, true); resetDirBtn(); });
-}
-
-function resetDirBtn() {
-  document.getElementById('start-dir-btn').disabled = false;
-  document.getElementById('stop-dir-btn').style.display = 'none';
-  document.getElementById('dir-badge').textContent = 'READY';
-  document.getElementById('dir-badge').className = 'module-badge module-badge--orange';
-  stopElapsed('dirElapsedTimer');
-}
-
-// ─── SSE Stream ───────────────────────────────────────────
-function streamJob(jobId, type) {
-  const termId = type === 'subdomain' ? 'sub-terminal' : 'dir-terminal';
-  const sse = new EventSource(`/api/jobs/${jobId}/stream`);
-  let scannedCount = 0;
-  let foundCount = 0;
-
-  sse.onmessage = (e) => {
-    const data = JSON.parse(e.data);
-
-    if (data.error) {
-      termAppend(termId, '[ERROR] ' + data.error);
-      sse.close(); return;
-    }
-
-    if (data.line) {
-      termAppend(termId, data.line);
-      if (type === 'subdomain') {
-        updateChipsFromLine(data.line);
-        // Parse live counts
-        const aliveMatch = data.line.match(/(\d+) alive domains/i);
-        const totalMatch = data.line.match(/Total unique subdomains found: (\d+)/i);
-        if (aliveMatch) document.getElementById('stat-alive').textContent = aliveMatch[1];
-        if (totalMatch) document.getElementById('stat-total').textContent = totalMatch[1];
-      }
-      if (type === 'dirscan') {
-        if (data.line.includes('[*] Auditing:')) {
-          scannedCount++;
-          document.getElementById('dir-stat-scanned').textContent = scannedCount;
-        }
-        if (data.line.includes('EXPOSED')) {
-          foundCount++;
-          document.getElementById('dir-stat-found').textContent = foundCount;
-        }
-      }
-    }
-
-    if (data.done) {
-      removeCursor(termId);
-      sse.close();
-
-      if (type === 'subdomain') {
-        stopElapsed('subElapsedTimer');
-        state.subdomainJob.status = data.status;
-        if (data.status === 'completed') {
-          document.getElementById('sub-badge').textContent = 'DONE';
-          document.getElementById('sub-badge').className = 'module-badge module-badge--done';
-          loadSubdomainResults(data.result);
-        } else {
-          document.getElementById('sub-badge').textContent = data.status === 'stopped' ? 'STOPPED' : 'FAILED';
-          document.getElementById('sub-badge').className = 'module-badge module-badge--failed';
-          if (data.status !== 'stopped') toast('Scan failed. Check terminal output.', true);
-        }
-        document.getElementById('start-sub-btn').disabled = false;
-        document.getElementById('stop-sub-btn').style.display = 'none';
-      }
-
-      if (type === 'dirscan') {
-        stopElapsed('dirElapsedTimer');
-        state.dirJob.status = data.status;
-        if (data.status === 'completed') {
-          document.getElementById('dir-badge').textContent = 'DONE';
-          document.getElementById('dir-badge').className = 'module-badge module-badge--done';
-          loadDirResults(data.result);
-        } else {
-          document.getElementById('dir-badge').textContent = data.status === 'stopped' ? 'STOPPED' : 'FAILED';
-          document.getElementById('dir-badge').className = 'module-badge module-badge--failed';
-          if (data.status !== 'stopped') toast('Scan failed. Check terminal output.', true);
-        }
-        document.getElementById('start-dir-btn').disabled = false;
-        document.getElementById('stop-dir-btn').style.display = 'none';
-      }
-
-      refreshHistory();
-    }
-  };
-
-  sse.onerror = () => {
-    termAppend(termId, '[ERROR] Connection to server lost.');
-    sse.close();
-    if (type === 'subdomain') resetSubBtn();
-    else resetDirBtn();
-  };
-}
-
-// ─── Load Subdomain Results ───────────────────────────────
-function loadSubdomainResults(result) {
-  if (!result || !result.domain) return;
-
-  state.aliveFile = result.alive_file;
-  state.aliveFileDomain = result.domain;
-
-  // Update alive file display in dir scanner
-  const display = document.getElementById('alive-file-path-display');
-  if (display) {
-    display.textContent = result.alive_file || 'No alive domains file found';
-    display.className = 'alive-file-path' + (result.alive_file ? '' : ' empty');
-  }
-  const labelEl = document.getElementById('dir-domain-label');
-  if (labelEl && !labelEl.value) labelEl.value = result.domain;
-
-  document.getElementById('stat-total').textContent = result.total_subdomains || 0;
-  document.getElementById('stat-alive').textContent = result.alive_count || 0;
-
-  fetch(`/api/results/subdomains/${encodeURIComponent(result.domain)}`)
     .then(r => r.json())
     .then(data => {
-      state.subResults = { alive: data.alive || [], all: data.all_subdomains || [] };
-      state.subResults._allFile = data.all_file;
-      state.subResults._aliveFile = data.alive_file;
-
-      document.getElementById('alive-count-badge').textContent = state.subResults.alive.length;
-      document.getElementById('all-count-badge').textContent = state.subResults.all.length;
-      document.getElementById('sub-results-card').style.display = 'block';
-      renderSubTable('alive');
-      toast(`✓ ${state.subResults.alive.length} alive domains found!`);
-    })
-    .catch(() => {
-      document.getElementById('sub-results-card').style.display = 'block';
-      toast('Results loaded from terminal output.');
-    });
-}
-
-// ─── Sub Results Table ────────────────────────────────────
-let currentSubTab = 'alive';
-function showResultTab(tab) {
-  currentSubTab = tab;
-  document.getElementById('itab-alive').classList.toggle('active', tab === 'alive');
-  document.getElementById('itab-all').classList.toggle('active', tab === 'all');
-  renderSubTable(tab);
-}
-
-function renderSubTable(tab) {
-  const tbody = document.getElementById('results-tbody');
-  tbody.innerHTML = '';
-  const list = tab === 'alive' ? state.subResults.alive : state.subResults.all;
-
-  if (!list || list.length === 0) {
-    tbody.innerHTML = `<tr><td colspan="4" style="text-align:center;color:var(--text-dim);padding:1.5rem;font-family:var(--mono);font-size:0.78rem;">No results</td></tr>`;
-    return;
-  }
-
-  list.forEach((host, i) => {
-    const tr = document.createElement('tr');
-    const isAlive = tab === 'alive';
-    const url = host.startsWith('http') ? host : `http://${host}`;
-    tr.innerHTML = `
-      <td class="num">${i + 1}</td>
-      <td class="host"><a href="${url}" target="_blank" rel="noopener">${host}</a></td>
-      <td><span class="badge ${isAlive ? 'badge-alive' : 'badge-sub'}">${isAlive ? 'ALIVE' : 'FOUND'}</span></td>
-      <td><a href="${url}" target="_blank" rel="noopener" class="btn-icon-only" title="Open">↗</a></td>
-    `;
-    tbody.appendChild(tr);
-  });
-}
-
-// ─── Download ─────────────────────────────────────────────
-function downloadFile(type) {
-  const path = type === 'alive' ? state.subResults._aliveFile : state.subResults._allFile;
-  if (!path) { toast('File not available', true); return; }
-  window.location.href = `/api/download?path=${encodeURIComponent(path)}`;
-}
-
-function downloadDirFindings() {
-  if (!state.dirResults._outputFile) { toast('No findings file available', true); return; }
-  window.location.href = `/api/download?path=${encodeURIComponent(state.dirResults._outputFile)}`;
-}
-
-// ─── Pass alive domains to dir scanner ───────────────────
-function passToDirectoryScanner() {
-  if (!state.aliveFile) { toast('No alive domains file yet', true); return; }
-  switchTab('dirscan');
-  selectFileSource('scan');
-  toast('Alive domains loaded from subdomain scan ✓');
-}
-
-// ─── Load Dir Results ─────────────────────────────────────
-function loadDirResults(result) {
-  if (!result) return;
-  state.dirResults = { findings: result.findings || [], _outputFile: result.output_file };
-
-  document.getElementById('dir-stat-found').textContent = result.total_findings || 0;
-  document.getElementById('dir-results-card').style.display = 'block';
-  renderFindingsTable(result.findings || []);
-
-  if (result.total_findings > 0) toast(`⚠ ${result.total_findings} exposures found!`, true);
-  else toast('✓ Scan complete — no verified exposures found.');
-}
-
-function renderFindingsTable(findings) {
-  const tbody = document.getElementById('findings-tbody');
-  const noMsg = document.getElementById('no-findings-msg');
-  tbody.innerHTML = '';
-
-  if (!findings || findings.length === 0) {
-    noMsg.style.display = 'flex';
-    return;
-  }
-  noMsg.style.display = 'none';
-
-  findings.forEach((url, i) => {
-    const type = guessFileType(url);
-    const tr = document.createElement('tr');
-    tr.innerHTML = `
-      <td class="num">${i + 1}</td>
-      <td class="host"><a href="${url}" target="_blank" rel="noopener">${url}</a></td>
-      <td><span class="badge badge-exposed">${type}</span></td>
-      <td><a href="${url}" target="_blank" rel="noopener" class="btn-icon-only" title="Open">↗</a></td>
-    `;
-    tbody.appendChild(tr);
-  });
-}
-
-function guessFileType(url) {
-  if (url.includes('.env'))          return '.ENV';
-  if (url.includes('.git'))          return '.GIT';
-  if (url.includes('.svn'))          return '.SVN';
-  if (url.includes('composer.json')) return 'COMPOSER';
-  if (url.includes('package.json'))  return 'PACKAGE';
-  if (url.includes('wp-config'))     return 'WP-CONFIG';
-  if (url.includes('config.php'))    return 'CONFIG';
-  return 'FILE';
-}
-
-// ─── Session History ──────────────────────────────────────
-function toggleHistory() {
-  document.getElementById('history-panel').classList.toggle('open');
-  refreshHistory();
-}
-
-function refreshHistory() {
-  fetch('/api/sessions')
-    .then(r => r.json())
-    .then(sessions => {
-      const list = document.getElementById('history-list');
-      if (!sessions.length) {
-        list.innerHTML = '<div class="history-empty">No scans yet</div>';
+      if (data.error) {
+        toast(data.error, true);
+        termAppend(`[ERROR] ${data.error}`);
+        resetUI();
         return;
       }
-      list.innerHTML = sessions.map(s => {
-        const dt = new Date(s.created_at).toLocaleString();
-        const meta = s.type === 'subdomain'
-          ? `Alive: ${s.result_summary?.alive_count ?? '—'}`
-          : `Findings: ${s.result_summary?.total_findings ?? '—'}`;
-        const statusColor = s.status === 'completed' ? 'var(--green)' : s.status === 'failed' ? 'var(--red)' : 'var(--cyan)';
-        const canLoad    = s.status === 'completed';
-        const canJump    = s.status === 'running';
-        const isClickable = canLoad || canJump;
+      state.currentJob = { id: data.job_id, domain: data.domain };
+      const sse = new EventSource(`/api/jobs/${data.job_id}/stream`);
+      state.currentJob.sse = sse;
 
-        const ctaText = canLoad ? 'Click to view results →'
-                      : canJump ? 'Click to view live scan →'
-                      : '';
+      let cSub = 0, cAlive = 0, cPort = 0, cPage = 0, cExp = 0;
 
-        const onclickAttr = canLoad ? `onclick="loadHistoryItem('${s.id}','${s.type}')"` 
-                          : canJump ? `onclick="jumpToRunning('${s.type}')"`
-                          : '';
-
-        return `<div class="history-item${isClickable ? ' history-item--clickable' : ''}" ${onclickAttr}>
-          <div class="history-item-top">
-            <div class="history-item-type">${s.type === 'subdomain' ? '◈ SUBDOMAIN' : s.type === 'commondir' ? '◈ COMMON DIR' : '◉ DIR SCAN'}</div>
-            <div class="history-item-status" style="color:${statusColor}">${s.status.toUpperCase()}</div>
-          </div>
-          <div class="history-item-domain">${s.domain}</div>
-          <div class="history-item-meta">${meta} · ${dt}</div>
-          ${isClickable ? `<div class="history-item-cta">${ctaText}</div>` : ''}
-        </div>`;
-
-      }).join('');
-    })
-    .catch(() => {});
-}
-
-// ─── Jump to a currently-running scan ────────────────────
-function jumpToRunning(type) {
-  if (type === 'subdomain') {
-    switchTab('subdomain');
-    document.getElementById('sub-terminal-card').style.display = 'block';
-  } else if (type === 'dirscan') {
-    switchTab('dirscan');
-    switchDirSubTab('sensitive');
-    document.getElementById('dir-terminal-card').style.display = 'block';
-  } else if (type === 'commondir') {
-    switchTab('dirscan');
-    switchDirSubTab('common');
-    document.getElementById('common-terminal-card').style.display = 'block';
-  }
-  document.getElementById('history-panel').classList.remove('open');
-}
-
-// ─── Load history item into UI ───────────────────────────
-function loadHistoryItem(jobId, type) {
-  toast('Loading results...');
-
-  fetch(`/api/jobs/${jobId}/status`)
-    .then(r => r.json())
-    .then(job => {
-      if (job.error) { toast('Could not load job: ' + job.error, true); return; }
-      const result = job.result || {};
-
-      if (type === 'subdomain') {
-        switchTab('subdomain');
-        // Restore state
-        state.aliveFile = result.alive_file || null;
-        state.aliveFileDomain = result.domain || job.domain;
-
-        // Update alive file display in dir scanner
-        const display = document.getElementById('alive-file-path-display');
-        if (display && result.alive_file) {
-          display.textContent = result.alive_file;
-          display.className = 'alive-file-path';
+      sse.onmessage = e => {
+        const d = JSON.parse(e.data);
+        if (d.error) {
+          termAppend(`[ERROR] ${d.error}`);
+          sse.close();
+          resetUI();
+          return;
         }
-        const labelEl = document.getElementById('dir-domain-label');
-        if (labelEl && result.domain) labelEl.value = result.domain;
+        if (d.line) {
+          termAppend(d.line);
+          if (d.line.includes('[PHASE:1:START]')) updateStepper(1, 'Phase 1: Scope Validation', 15);
+          if (d.line.includes('[PHASE:2:START]')) updateStepper(2, 'Phase 2: Associated Roots', 25);
+          if (d.line.includes('[PHASE:3:START]')) updateStepper(3, 'Phase 3: Subdomain Enumeration', 40);
+          if (d.line.includes('[PHASE:4:START]')) updateStepper(4, 'Phase 4: Port Scanning', 60);
+          if (d.line.includes('[PHASE:5:START]')) updateStepper(5, 'Phase 5: Crawling & Secret Hunting', 80);
+          if (d.line.includes('[PHASE:6:START]')) updateStepper(6, 'Phase 6: Directory Audit', 90);
+          if (d.line.includes('[PHASE:DONE]')) updateStepper(6, 'Pipeline Complete', 100);
 
-        // Show stats
-        document.getElementById('sub-stats-row').style.display = 'grid';
-        document.getElementById('stat-total').textContent = result.total_subdomains || 0;
-        document.getElementById('stat-alive').textContent = result.alive_count || 0;
-        document.getElementById('stat-elapsed').textContent = '—';
+          if (d.line.includes('Aggregated') || d.line.includes('Discovered')) {
+            const m = d.line.match(/(\d+)\s+(?:candidate\s+)?subdomains/i);
+            if (m) {
+              cSub = Math.max(cSub, parseInt(m[1], 10));
+              document.getElementById('stat-subdomains').textContent = cSub;
+            }
+          }
+          if (d.line.includes('ALIVE:')) document.getElementById('stat-alive').textContent = ++cAlive;
+          if (d.line.startsWith('[PORT]')) document.getElementById('stat-ports').textContent = ++cPort;
+          if (d.line.includes('Crawling:')) document.getElementById('stat-pages').textContent = ++cPage;
+          if (d.line.includes('[EXPOSED]') || d.line.includes('SECRET')) {
+            document.getElementById('stat-exposures').textContent = ++cExp;
+          }
+        }
+        if (d.done) {
+          sse.close();
+          resetUI();
+          if (d.status === 'stopped') {
+            updateStepper(1, 'Scan Stopped by User', 0);
+            toast('Scan stopped.');
+          } else if (d.status === 'failed') {
+            updateStepper(1, 'Scan Failed', 0);
+            toast('Scan failed. Check terminal output.', true);
+          } else {
+            updateStepper(6, 'Pipeline Complete', 100);
+          }
+          if (d.result && Object.keys(d.result).length > 0 && d.status !== 'failed') {
+            state.reconResults = d.result;
+            renderAll(d.result);
+            document.getElementById('export-bar').classList.remove('hidden');
+            const expTotal =
+              (d.result.directories?.sensitive_findings?.length || 0) +
+              (d.result.crawler?.exposed_secrets?.length || 0);
+            if (d.status === 'completed') {
+              toast(`Scan complete! Found ${expTotal} exposures.`);
+            }
+            refreshSessionDropdown();
+          }
+        }
+      };
 
-        // Update badge
-        document.getElementById('sub-badge').textContent = 'DONE';
-        document.getElementById('sub-badge').className = 'module-badge module-badge--done';
-
-        // Fetch and render results
-        const domain = result.domain || job.domain;
-        fetch(`/api/results/subdomains/${encodeURIComponent(domain)}`)
-          .then(r => r.json())
-          .then(data => {
-            state.subResults = { alive: data.alive || [], all: data.all_subdomains || [] };
-            state.subResults._allFile = data.all_file;
-            state.subResults._aliveFile = data.alive_file;
-
-            document.getElementById('alive-count-badge').textContent = state.subResults.alive.length;
-            document.getElementById('all-count-badge').textContent = state.subResults.all.length;
-            document.getElementById('sub-results-card').style.display = 'block';
-            document.getElementById('sub-terminal-card').style.display = 'none';
-            renderSubTable('alive');
-            toast(`✓ Loaded: ${state.subResults.alive.length} alive domains for ${domain}`);
-
-            // Close history panel
-            document.getElementById('history-panel').classList.remove('open');
-          })
-          .catch(() => toast('Could not load subdomain list', true));
-
-      } else if (type === 'dirscan') {
-        switchTab('dirscan');
-
-        const findings = result.findings || [];
-        state.dirResults = { findings, _outputFile: result.output_file };
-
-        // Show stats
-        document.getElementById('dir-stats-row').style.display = 'grid';
-        document.getElementById('dir-stat-found').textContent = result.total_findings || 0;
-        document.getElementById('dir-stat-scanned').textContent = '—';
-        document.getElementById('dir-stat-elapsed').textContent = '—';
-
-        // Update badge
-        document.getElementById('dir-badge').textContent = 'DONE';
-        document.getElementById('dir-badge').className = 'module-badge module-badge--done';
-
-        // Render findings
-        document.getElementById('dir-results-card').style.display = 'block';
-        document.getElementById('dir-terminal-card').style.display = 'none';
-        renderFindingsTable(findings);
-
-        const count = findings.length;
-        toast(count > 0 ? `⚠ Loaded: ${count} verified exposures` : '✓ Loaded: No exposures found');
-
-        // Close history panel
-        document.getElementById('history-panel').classList.remove('open');
-      }
+      sse.onerror = () => {
+        sse.close();
+        resetUI();
+      };
     })
-    .catch(e => toast('Failed to load results: ' + e.message, true));
+    .catch(err => {
+      toast(`Failed to start scan: ${err.message}`, true);
+      resetUI();
+    });
 }
 
-// ─── Stop Scan ───────────────────────────────────────────
-function stopScan(type) {
-  const jobMap = {
-    subdomain: state.subdomainJob,
-    dirscan:   state.dirJob,
-    commondir: state.commonJob,
-  };
-  const job = jobMap[type];
-  if (!job || !job.id) { toast('No active scan to stop', true); return; }
-
-  fetch(`/api/jobs/${job.id}/stop`, { method: 'POST' })
-    .then(r => r.json())
-    .then(data => {
-      if (data.error) { toast(data.error, true); return; }
-      toast('■ Scan stopped.');
-      // UI reset handled by SSE done event (status=stopped)
-    })
-    .catch(e => toast('Stop failed: ' + e.message, true));
-}
-
-// ─── Dir Sub-Tab Switcher ─────────────────────────────────
-function switchDirSubTab(tab) {
-  document.getElementById('dirpanel-sensitive').style.display = tab === 'sensitive' ? 'block' : 'none';
-  document.getElementById('dirpanel-common').style.display   = tab === 'common'    ? 'block' : 'none';
-  document.getElementById('dsubtab-sensitive').classList.toggle('active', tab === 'sensitive');
-  document.getElementById('dsubtab-common').classList.toggle('active', tab === 'common');
-}
-
-// ─── Common scan file source ──────────────────────────────
-let commonFileSource = 'scan';
-
-function selectCommonFileSource(src) {
-  commonFileSource = src;
-  document.getElementById('csrc-from-scan').classList.toggle('active', src === 'scan');
-  document.getElementById('csrc-custom').classList.toggle('active', src === 'custom');
-  document.getElementById('csrc-scan-panel').style.display  = src === 'scan'   ? 'block' : 'none';
-  document.getElementById('csrc-custom-panel').style.display = src === 'custom' ? 'block' : 'none';
-}
-
-// ─── Start Common Dir Scan ────────────────────────────────
-function startCommonDirScan() {
-  const targetUrl = document.getElementById('common-target-url').value.trim();
-
-  if (!targetUrl) { toast('Please enter a target URL', true); return; }
-  if (!targetUrl.startsWith('http://') && !targetUrl.startsWith('https://')) {
-    toast('URL must start with http:// or https://', true); return;
+function stopActiveScan() {
+  if (state.currentJob) {
+    if (state.currentJob.sse) state.currentJob.sse.close();
+    fetch(`/api/jobs/${state.currentJob.id}/stop`, { method: 'POST' }).catch(() => {});
   }
-  if (state.commonJob && state.commonJob.status === 'running') {
-    toast('A common directory scan is already running', true); return;
-  }
-
-  // Derive domain label from URL
-  let domain = 'unknown';
-  try { domain = new URL(targetUrl).hostname; } catch(e) {}
-
-  // Reset UI
-  clearTerminal('common-terminal');
-  document.getElementById('common-terminal-card').style.display = 'block';
-  document.getElementById('common-stats-row').style.display = 'grid';
-  document.getElementById('common-results-card').style.display = 'none';
-  document.getElementById('common-stat-scanned').textContent = '0';
-  document.getElementById('common-stat-found').textContent = '0';
-  document.getElementById('common-stat-elapsed').textContent = '0s';
-  document.getElementById('common-terminal-title').textContent = `bash — common_dir_scan.sh (4750 paths)`;
-  document.getElementById('dir-badge').textContent = 'RUNNING';
-  document.getElementById('dir-badge').className = 'module-badge module-badge--running';
-  document.getElementById('start-common-btn').disabled = true;
-  document.getElementById('stop-common-btn').style.display = 'flex';
-
-  startElapsed('commonElapsedTimer', 'common-stat-elapsed');
-  termAppend('common-terminal', `[*] Target: ${targetUrl}`);
-  termAppend('common-terminal', `[*] Wordlist: common.txt (4750 entries) — reporting 200 OK only`);
-
-  fetch('/api/scan/common-dirs', {
-    method: 'POST',
-    headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({ url: targetUrl, domain }),
-  })
-  .then(r => r.json())
-  .then(data => {
-    if (data.error) { toast(data.error, true); resetCommonBtn(); return; }
-    state.commonJob = { id: data.job_id, domain, status: 'running' };
-    streamCommonJob(data.job_id);
-    refreshHistory();
-  })
-  .catch(e => { toast('Failed to start scan: ' + e.message, true); resetCommonBtn(); });
+  resetUI();
 }
 
-function resetCommonBtn() {
-  document.getElementById('start-common-btn').disabled = false;
-  document.getElementById('stop-common-btn').style.display = 'none';
-  document.getElementById('dir-badge').textContent = 'READY';
-  document.getElementById('dir-badge').className = 'module-badge module-badge--orange';
-  stopElapsed('commonElapsedTimer');
+function resetUI() {
+  document.getElementById('start-full-btn').disabled = false;
+  document.querySelectorAll('.btn-module-run').forEach(b => (b.disabled = false));
+  document.getElementById('stop-scan-btn').classList.add('hidden');
+  document.getElementById('server-label').textContent = 'Ready';
 }
 
-// ─── SSE Stream for Common Dir ────────────────────────────
-function streamCommonJob(jobId) {
-  const sse = new EventSource(`/api/jobs/${jobId}/stream`);
-  let scannedCount = 0;
-  let foundCount = 0;
+function renderAll(r) {
+  const subs = r.subdomains?.records || [];
+  const ports = r.ports?.findings || [];
+  const pages = r.crawler?.pages || [];
+  const jsSecrets = r.crawler?.exposed_secrets || [];
+  const dirSens = r.directories?.sensitive_findings || [];
+  const takeovers = r.subdomains?.takeover_findings || [];
 
-  sse.onmessage = (e) => {
-    const data = JSON.parse(e.data);
+  document.getElementById('stat-subdomains').textContent = subs.length;
+  document.getElementById('stat-alive').textContent = subs.filter(s => s.alive).length;
+  document.getElementById('stat-ports').textContent = ports.length;
+  document.getElementById('stat-pages').textContent = pages.length;
+  document.getElementById('stat-exposures').textContent = jsSecrets.length + dirSens.length + takeovers.length;
 
-    if (data.error) { termAppend('common-terminal', '[ERROR] ' + data.error); sse.close(); return; }
+  renderRiskAssessment(r.risk_assessment);
 
-    if (data.line) {
-      termAppend('common-terminal', data.line);
-      if (data.line.includes('[*] Scanning:')) {
-        scannedCount++;
-        document.getElementById('common-stat-scanned').textContent = scannedCount;
-      }
-      if (data.line.includes('[FOUND]')) {
-        foundCount++;
-        document.getElementById('common-stat-found').textContent = foundCount;
-      }
-    }
+  // Overview Cards
+  document.getElementById('overview-sub-list').innerHTML =
+    subs.slice(0, 5).map(s => `<div class="overview-item">● ${escapeHtml(s.subdomain)}</div>`).join('') || 'No data';
+  document.getElementById('overview-assoc-list').innerHTML =
+    (r.associated_domains || []).slice(0, 5).map(a => `<div class="overview-item">⎇ ${escapeHtml(a.domain)}</div>`).join('') || 'No data';
+  document.getElementById('overview-port-list').innerHTML =
+    ports.slice(0, 5).map(p => `<div class="overview-item">⚡ ${escapeHtml(p.host)}:${escapeHtml(p.port)}</div>`).join('') || 'No data';
 
-    if (data.done) {
-      removeCursor('common-terminal');
-      sse.close();
-      stopElapsed('commonElapsedTimer');
-      state.commonJob.status = data.status;
+  let expHtml = '';
+  takeovers.slice(0, 2).forEach(t => {
+    expHtml += `<div class="overview-item text-red">⚠️ Takeover: ${escapeHtml(t.subdomain)}</div>`;
+  });
+  dirSens.slice(0, 3).forEach(s => {
+    expHtml += `<div class="overview-item text-red">🔐 ${escapeHtml(s.url)}</div>`;
+  });
+  jsSecrets.slice(0, 2).forEach(s => {
+    expHtml += `<div class="overview-item text-red">🔐 ${escapeHtml(s.type)} in JS</div>`;
+  });
+  document.getElementById('overview-exp-list').innerHTML = expHtml || 'No data';
 
-      if (data.status === 'completed') {
-        document.getElementById('dir-badge').textContent = 'DONE';
-        document.getElementById('dir-badge').className = 'module-badge module-badge--done';
-        loadCommonDirResults(data.result);
-      } else {
-        document.getElementById('dir-badge').textContent = data.status === 'stopped' ? 'STOPPED' : 'FAILED';
-        document.getElementById('dir-badge').className = 'module-badge module-badge--failed';
-        if (data.status !== 'stopped') toast('Scan failed. Check terminal output.', true);
-      }
-      document.getElementById('start-common-btn').disabled = false;
-      document.getElementById('stop-common-btn').style.display = 'none';
-      refreshHistory();
-    }
-  };
-
-  sse.onerror = () => {
-    termAppend('common-terminal', '[ERROR] Connection to server lost.');
-    sse.close();
-    resetCommonBtn();
-  };
+  // Tables
+  renderSubdomainsTable(r.subdomains);
+  renderPortsTable(r.ports);
+  renderCrawler(r.crawler);
+  renderAssociated(r.associated_domains);
+  renderExposures(jsSecrets, dirSens, r.directories?.directory_findings || [], takeovers);
 }
 
-// ─── Load Common Dir Results ──────────────────────────────
-function loadCommonDirResults(result) {
-  if (!result) return;
-  const findings = result.findings || [];
-  state.commonResults = { findings, _outputFile: result.output_file };
-
-  document.getElementById('common-stat-found').textContent = findings.length;
-  document.getElementById('common-results-card').style.display = 'block';
-  renderCommonFindingsTable(findings);
-
-  if (findings.length > 0) toast(`📂 ${findings.length} common directories found!`);
-  else toast('✓ No common directories found.');
-}
-
-function renderCommonFindingsTable(findings) {
-  const tbody = document.getElementById('common-findings-tbody');
-  const noMsg = document.getElementById('common-no-findings-msg');
-  tbody.innerHTML = '';
-
-  if (!findings || findings.length === 0) {
-    noMsg.style.display = 'flex';
+function renderRiskAssessment(risk) {
+  const card = document.getElementById('risk-posture-card');
+  const pill = document.getElementById('risk-score-pill');
+  const list = document.getElementById('risk-recs-list');
+  if (!card || !pill || !list) return;
+  if (!risk) {
+    card.classList.add('hidden');
     return;
   }
-  noMsg.style.display = 'none';
+  card.classList.remove('hidden');
+  const col = risk.color || '#38bdf8';
+  card.style.borderLeftColor = col;
+  pill.textContent = `${risk.level || 'LOW'} RISK (${risk.score ?? 10}/100)`;
+  pill.style.color = col;
+  pill.style.borderColor = col + '55';
+  pill.style.background = col + '18';
 
-  findings.forEach((item, i) => {
-    const url   = typeof item === 'object' ? item.url  : item;
-    const code  = typeof item === 'object' ? item.code : '?';
-    const badgeClass = code === '200' ? 'badge-alive'
-                     : code === '403' ? 'badge-exposed'
-                     : 'badge-sub';
-    const tr = document.createElement('tr');
-    tr.innerHTML = `
-      <td class="num">${i + 1}</td>
-      <td class="host"><a href="${url}" target="_blank" rel="noopener">${url}</a></td>
-      <td><span class="badge ${badgeClass}">${code}</span></td>
-      <td><a href="${url}" target="_blank" rel="noopener" class="btn-icon-only" title="Open">↗</a></td>
-    `;
-    tbody.appendChild(tr);
-  });
-}
-
-function downloadCommonFindings() {
-  if (!state.commonResults || !state.commonResults._outputFile) { toast('No report available', true); return; }
-  window.location.href = `/api/download?path=${encodeURIComponent(state.commonResults._outputFile)}`;
-}
-
-// ─── Init ─────────────────────────────────────────────────
-document.addEventListener('DOMContentLoaded', () => {
-  // Allow Enter key in domain input
-  document.getElementById('domain-input').addEventListener('keydown', e => {
-    if (e.key === 'Enter') startSubdomainScan();
-  });
-
-  // Extend state with new fields
-  state.commonJob = null;
-  state.commonResults = { findings: [] };
-  state.commonElapsedTimer = null;
-
-  // Ping server
-  fetch('/api/sessions')
-    .then(() => {
-      document.getElementById('server-dot').style.background = 'var(--green)';
-      document.getElementById('server-label').textContent = 'Connected';
-    })
-    .catch(() => {
-      document.getElementById('server-dot').style.background = 'var(--red)';
-      document.getElementById('server-label').textContent = 'Offline';
-    });
-
-  refreshHistory();
-});
-
-// ─── Patch: sync common alive file display when subdomain scan completes ──
-const _origLoadSubResults = loadSubdomainResults;
-// Override to also update common panel
-window.loadSubdomainResults = function(result) {
-  _origLoadSubResults(result);
-  const el = document.getElementById('common-alive-file-path-display');
-  if (el && result && result.alive_file) {
-    el.textContent = result.alive_file;
-    el.className = 'alive-file-path';
+  const recs = risk.recommendations || [];
+  if (!recs.length) {
+    list.innerHTML = '<div style="font-size:0.82rem;color:var(--blue-bright);">✓ No high-risk exposures or immediate remediation actions identified.</div>';
+    return;
   }
-  const lbl = document.getElementById('common-domain-label');
-  if (lbl && result && result.domain && !lbl.value) lbl.value = result.domain;
-};
-
-// ─── Patch: history item restore for commondir type ──────
-const _origLoadHistoryItem = loadHistoryItem;
-window.loadHistoryItem = function(jobId, type) {
-  if (type !== 'commondir') { _origLoadHistoryItem(jobId, type); return; }
-
-  toast('Loading common dir results...');
-  fetch(`/api/jobs/${jobId}/status`)
-    .then(r => r.json())
-    .then(job => {
-      if (job.error) { toast('Could not load job', true); return; }
-      switchTab('dirscan');
-      switchDirSubTab('common');
-
-      const result = job.result || {};
-      const findings = result.findings || [];
-      state.commonResults = { findings, _outputFile: result.output_file };
-
-      document.getElementById('common-stats-row').style.display = 'grid';
-      document.getElementById('common-stat-found').textContent = findings.length;
-      document.getElementById('common-stat-scanned').textContent = '—';
-      document.getElementById('common-stat-elapsed').textContent = '—';
-      document.getElementById('dir-badge').textContent = 'DONE';
-      document.getElementById('dir-badge').className = 'module-badge module-badge--done';
-      document.getElementById('common-results-card').style.display = 'block';
-      document.getElementById('common-terminal-card').style.display = 'none';
-      renderCommonFindingsTable(findings);
-
-      toast(findings.length > 0 ? `📂 Loaded: ${findings.length} paths` : '✓ No paths found');
-      document.getElementById('history-panel').classList.remove('open');
-    })
-    .catch(e => toast('Failed: ' + e.message, true));
-};
-
-// ─── Map Interaction ──────────────────────────────────────
-document.addEventListener('DOMContentLoaded', () => {
-  const mapTooltip = document.getElementById('map-tooltip');
-  const indiaMapContainer = document.getElementById('india-map-container');
-  
-  if (indiaMapContainer && mapTooltip) {
-    const initMap = () => {
-      const paths = indiaMapContainer.querySelectorAll('path');
-      paths.forEach(path => {
-        path.addEventListener('mouseenter', (e) => {
-          let stateName = path.getAttribute('aria-label') || path.getAttribute('title') || path.getAttribute('id');
-          if (stateName) {
-            stateName = stateName.replace('IN-', '').replace(/-/g, ' ');
-            mapTooltip.textContent = stateName;
-            mapTooltip.style.opacity = '1';
-          }
-        });
-        path.addEventListener('mouseleave', () => {
-          mapTooltip.style.opacity = '0';
-        });
-      });
-    };
-    initMap();
-  }
-});
-
-
-/* =========================================================
-   Git-Dumper module (additive — wraps existing functions the
-   same way this file already does for loadSubdomainResults /
-   loadHistoryItem, rather than editing them in place)
-   ========================================================= */
-
-// ─── Wrap switchTab to also toggle the Git-Dumper module ──
-const _origSwitchTab = switchTab;
-window.switchTab = function(tab) {
-  _origSwitchTab(tab);
-  const mod = document.getElementById('module-gitdump');
-  const tabBtn = document.getElementById('tab-gitdump');
-  if (mod) mod.classList.toggle('hidden', tab !== 'gitdump');
-  if (tabBtn) tabBtn.classList.toggle('active', tab === 'gitdump');
-  if (tab === 'gitdump') checkGitDumperAvailability();
-};
-
-// ─── Wrap renderFindingsTable to surface .git findings ────
-const _origRenderFindingsTable = renderFindingsTable;
-window.renderFindingsTable = function(findings) {
-  _origRenderFindingsTable(findings);
-  addGitDumperSendButtons(findings);
-  collectGitDumpFindings(findings);
-};
-
-function addGitDumperSendButtons(findings) {
-  const tbody = document.getElementById('findings-tbody');
-  if (!tbody || !findings) return;
-  const rows = tbody.querySelectorAll('tr');
-  findings.forEach((url, i) => {
-    if (!url.includes('/.git/HEAD')) return;
-    const row = rows[i];
-    if (!row) return;
-    const actionTd = row.querySelector('td:last-child');
-    if (!actionTd || actionTd.querySelector('.btn-gitdump-send')) return;
-    const btn = document.createElement('button');
-    btn.className = 'btn-icon-only btn-gitdump-send';
-    btn.title = 'Send to Git-Dumper';
-    btn.textContent = '⎋';
-    btn.onclick = () => sendToGitDumper(url);
-    actionTd.appendChild(btn);
-  });
+  list.innerHTML = recs
+    .map(
+      rec => `
+    <div class="rec-item">
+      <div class="rec-item-title">
+        <span class="badge" style="color:${rec.severity === 'CRITICAL' ? 'var(--red)' : rec.severity === 'HIGH' ? 'var(--yellow)' : 'var(--blue-bright)'};">${escapeHtml(rec.severity)}</span>
+        <span>${escapeHtml(rec.title)}</span>
+      </div>
+      <div style="color:var(--text-dim);font-size:0.8rem;">${escapeHtml(rec.desc)}</div>
+      <div class="rec-item-action">→ Fix: ${escapeHtml(rec.action)}</div>
+    </div>
+  `
+    )
+    .join('');
 }
 
-function collectGitDumpFindings(findings) {
-  if (!findings) return;
-  let added = false;
-  findings.forEach(url => {
-    if (url.includes('/.git/HEAD') && !state.gitdumpFindings.includes(url)) {
-      state.gitdumpFindings.push(url);
-      added = true;
+function renderSubdomainsTable(data) {
+  if (!data) return;
+  const records = data.records || [];
+  const q = (document.getElementById('subdomain-search-input')?.value || '').trim().toLowerCase();
+  let list = state.activeSubTab === 'alive' ? records.filter(r => r.alive) : records;
+  if (q) {
+    list = list.filter(
+      r =>
+        (r.subdomain || '').toLowerCase().includes(q) ||
+        (r.ip || '').toLowerCase().includes(q) ||
+        (r.waf || '').toLowerCase().includes(q) ||
+        (r.server || '').toLowerCase().includes(q) ||
+        (r.title || '').toLowerCase().includes(q)
+    );
+  }
+  document.getElementById('subdomains-tbody').innerHTML =
+    list
+      .map((r, i) => {
+        const sh = r.sec_headers || {};
+        const secHtml = r.alive
+          ? [
+              ['HSTS', sh.hsts],
+              ['CSP', sh.csp],
+              ['XFO', sh.x_frame_options],
+              ['XCTO', sh.x_content_type],
+            ]
+              .map(([lbl, ok]) => `<span class="sec-pill ${ok ? 'sec-pill--ok' : 'sec-pill--miss'}" title="${lbl}: ${ok ? 'Present' : 'Missing'}">${lbl}</span>`)
+              .join('')
+          : '<span style="color:var(--text-dim)">-</span>';
+        const wafBadge =
+          r.waf && r.waf !== 'None' && r.waf !== 'Direct / Unknown'
+            ? `<div style="font-size:0.7rem;color:var(--blue-bright);margin-top:2px;">🛡️ ${escapeHtml(r.waf)}</div>`
+            : '';
+        return `
+    <tr>
+      <td>${i + 1}</td>
+      <td class="text-blue" style="font-family:var(--font-mono);font-weight:600;">${escapeHtml(r.subdomain)}</td>
+      <td style="color:var(--text-dim);font-family:var(--font-mono);font-size:0.78rem;">${escapeHtml(r.ip)}</td>
+      <td><span class="badge ${r.alive ? 'badge--green' : ''}">${escapeHtml(r.status_code)}</span></td>
+      <td style="max-width:200px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;" title="${escapeHtml(r.title || '')}">${escapeHtml(r.title || '-')}</td>
+      <td><div>${escapeHtml(r.server)}</div>${wafBadge}</td>
+      <td>${secHtml}</td>
+      <td><a href="${escapeHtml(r.url)}" target="_blank" rel="noopener" class="btn-secondary" style="padding:3px 9px;font-size:0.75rem;">Visit ↗</a></td>
+    </tr>
+  `;
+      })
+      .join('') || '<tr><td colspan="8" class="table-empty">No subdomains found.</td></tr>';
+}
+
+function renderPortsTable(data) {
+  if (!data) return;
+  const findings = data.findings || [];
+  document.getElementById('ports-tbody').innerHTML =
+    findings
+      .map(
+        (p, i) => `
+    <tr>
+      <td>${i + 1}</td>
+      <td style="font-family:var(--font-mono);font-weight:600;">${escapeHtml(p.host)}</td>
+      <td class="text-yellow" style="font-weight:bold;">${escapeHtml(p.port)}</td>
+      <td>${escapeHtml(p.protocol)}</td>
+      <td>${escapeHtml(p.service)}</td>
+      <td style="color:var(--text-dim)">${escapeHtml(p.banner)}</td>
+    </tr>
+  `
+      )
+      .join('') || '<tr><td colspan="6" class="table-empty">No open ports.</td></tr>';
+}
+
+function renderCrawler(data) {
+  if (!data) return;
+  const pages = data.pages || [];
+  const apis = data.api_endpoints || [];
+  const scripts = data.scripts || [];
+
+  document.getElementById('crawler-pages-tbody').innerHTML =
+    pages
+      .map(
+        (p, i) => `
+    <tr><td>${i + 1}</td><td class="text-blue" style="font-family:var(--font-mono)">${escapeHtml(p.url)}</td><td><span class="badge">${escapeHtml(p.status)}</span></td><td>${escapeHtml(p.depth)}</td></tr>
+  `
+      )
+      .join('') || '<tr><td colspan="4" class="table-empty">No pages.</td></tr>';
+
+  document.getElementById('crawler-api-tbody').innerHTML =
+    apis
+      .map(
+        (a, i) => `
+    <tr><td>${i + 1}</td><td class="text-purple" style="font-family:var(--font-mono)">${escapeHtml(a)}</td><td><a href="${escapeHtml(a)}" target="_blank" rel="noopener" class="btn-secondary" style="padding:2px 8px;font-size:0.75rem;">Open ↗</a></td></tr>
+  `
+      )
+      .join('') || '<tr><td colspan="3" class="table-empty">No APIs.</td></tr>';
+
+  document.getElementById('crawler-scripts-tbody').innerHTML =
+    scripts
+      .map(
+        (s, i) => `
+    <tr><td>${i + 1}</td><td style="font-family:var(--font-mono);color:var(--text-dim)">${escapeHtml(s)}</td><td><a href="${escapeHtml(s)}" target="_blank" rel="noopener" class="btn-secondary" style="padding:2px 8px;font-size:0.75rem;">Inspect ↗</a></td></tr>
+  `
+      )
+      .join('') || '<tr><td colspan="3" class="table-empty">No scripts.</td></tr>';
+}
+
+function renderAssociated(data) {
+  if (!data) return;
+  document.getElementById('associated-cards-container').innerHTML =
+    data
+      .map(
+        a => `
+    <div class="assoc-card" style="background:var(--bg-input);border:1px solid var(--border);padding:1rem;border-radius:8px;margin-bottom:0.5rem;">
+      <div class="assoc-domain" style="font-family:var(--font-mono);font-weight:bold;color:var(--cyan);">${escapeHtml(a.domain)}</div>
+      <div class="assoc-rel" style="font-size:0.8rem;color:var(--text-dim);margin-top:4px;">${escapeHtml(a.relationship)} (${escapeHtml(a.source || 'OSINT')})</div>
+    </div>
+  `
+      )
+      .join('') || '<div class="table-empty">No associated roots.</div>';
+}
+
+function renderExposures(jsSecrets, dirSens, dirs, takeovers = []) {
+  let html = '';
+  let rowIdx = 1;
+  takeovers.forEach(t => {
+    html += `<tr style="background:rgba(255,68,102,0.08);"><td>${rowIdx++}</td><td class="text-red" style="font-family:var(--font-mono);font-weight:600;">${escapeHtml(t.subdomain)}</td><td><span class="badge badge--red" style="background:rgba(255,68,102,0.2);color:var(--red);padding:2px 8px;border-radius:4px;font-size:0.7rem;">Subdomain Takeover (${escapeHtml(t.takeover_provider)})</span></td><td style="font-family:var(--font-mono);color:var(--red);">${escapeHtml(t.cname)}</td><td>Dangling CNAME</td><td><a href="${escapeHtml(t.url)}" target="_blank" rel="noopener" class="btn-secondary" style="padding:2px 8px;font-size:0.75rem;">Verify ↗</a></td></tr>`;
+  });
+  dirSens.forEach(s => {
+    html += `<tr style="background:rgba(255,68,102,0.05);"><td>${rowIdx++}</td><td class="text-red" style="font-family:var(--font-mono);font-weight:600;">${escapeHtml(s.url)}</td><td><span class="badge badge--red" style="background:rgba(255,68,102,0.2);color:var(--red);padding:2px 8px;border-radius:4px;font-size:0.7rem;">Sensitive File</span></td><td>${escapeHtml(s.status)}</td><td>${escapeHtml(s.size)} B</td><td><a href="${escapeHtml(s.url)}" target="_blank" rel="noopener" class="btn-secondary" style="padding:2px 8px;font-size:0.75rem;">Review ↗</a></td></tr>`;
+    if (s.url && s.url.includes('/.git/HEAD') && !state.gitdumpFindings.includes(s.url)) {
+      state.gitdumpFindings.push(s.url);
     }
   });
-  if (added) renderGitDumpFindings();
+  jsSecrets.forEach(s => {
+    html += `<tr style="background:rgba(255,140,66,0.05);"><td>${rowIdx++}</td><td class="text-yellow" style="font-family:var(--font-mono);font-weight:600;">${escapeHtml(s.url)}</td><td><span class="badge badge--orange" style="background:rgba(255,140,66,0.2);color:var(--yellow);padding:2px 8px;border-radius:4px;font-size:0.7rem;">JS Secret (${escapeHtml(s.type)})</span></td><td style="font-family:var(--font-mono);color:var(--red);word-break:break-all;">${escapeHtml(s.match)}</td><td>-</td><td><a href="${escapeHtml(s.url)}" target="_blank" rel="noopener" class="btn-secondary" style="padding:2px 8px;font-size:0.75rem;">Review ↗</a></td></tr>`;
+  });
+
+  document.getElementById('sensitive-tbody').innerHTML =
+    html || '<tr><td colspan="6" class="table-empty text-green">✓ No sensitive exposures found.</td></tr>';
+
+  document.getElementById('directories-tbody').innerHTML =
+    dirs
+      .map(
+        (d, i) => `
+    <tr><td>${i + 1}</td><td class="text-blue" style="font-family:var(--font-mono)">${escapeHtml(d.url)}</td><td><span class="badge">${escapeHtml(d.status)}</span></td><td>${escapeHtml(d.size)} B</td><td><a href="${escapeHtml(d.url)}" target="_blank" rel="noopener" class="btn-secondary" style="padding:2px 8px;font-size:0.75rem;">Open ↗</a></td></tr>
+  `
+      )
+      .join('') || '<tr><td colspan="5" class="table-empty">No directories.</td></tr>';
+
+  renderGitDumpFindings();
 }
 
-// ─── Wrap stopScan to add the gitdump case ─────────────────
-const _origStopScan = stopScan;
-window.stopScan = function(type) {
-  if (type !== 'gitdump') { _origStopScan(type); return; }
-  const job = state.gitdumpJob;
-  if (!job || !job.id) { toast('No active dump to stop', true); return; }
-  fetch(`/api/jobs/${job.id}/stop`, { method: 'POST' })
-    .then(r => r.json())
-    .then(data => {
-      if (data.error) { toast(data.error, true); return; }
-      toast('■ Dump stopped.');
-    })
-    .catch(e => toast('Stop failed: ' + e.message, true));
-};
+// ─── Git-Dumper Integration ─────────────────────────────────
+function renderGitDumpFindings() {
+  const list = document.getElementById('gitdump-findings-list');
+  if (!list) return;
+  if (!state.gitdumpFindings.length) {
+    list.innerHTML = '<div class="table-empty" style="padding:1rem !important;">No /.git/HEAD targets added yet.</div>';
+    return;
+  }
+  list.innerHTML = state.gitdumpFindings
+    .map(
+      url => `
+    <div style="display:flex;align-items:center;justify-content:space-between;padding:0.6rem 1rem;border:1px solid ${state.gitdumpSelected === url ? 'var(--red)' : 'var(--border)'};border-radius:8px;margin-bottom:0.5rem;background:var(--bg-input);">
+      <span style="font-family:var(--font-mono);font-size:0.85rem;color:var(--cyan);">${escapeHtml(url)}</span>
+      <button class="btn-secondary" onclick="selectGitDumpTarget('${escapeHtml(url)}')">Select Target</button>
+    </div>
+  `
+    )
+    .join('');
+}
 
-// ─── Send a finding from Directory Scanner into Git-Dumper ─
-function sendToGitDumper(url) {
-  if (!state.gitdumpFindings.includes(url)) state.gitdumpFindings.push(url);
-  switchTab('gitdump');
+function selectGitDumpTarget(url) {
+  state.gitdumpSelected = url;
   renderGitDumpFindings();
-  selectGitDumpTarget(url);
-  toast('Loaded into Git-Dumper — review and confirm to run.');
+  const confirmCard = document.getElementById('gitdump-confirm-card');
+  if (confirmCard) confirmCard.classList.remove('hidden');
+  const disp = document.getElementById('gitdump-target-display');
+  if (disp) disp.textContent = url;
 }
 
 function addCustomGitDumpTarget() {
   const input = document.getElementById('gitdump-custom-url');
-  let url = input.value.trim();
-  if (!url) { toast('Enter a target URL', true); return; }
-  if (!url.startsWith('http://') && !url.startsWith('https://')) {
-    toast('URL must start with http:// or https://', true); return;
-  }
-  if (!url.endsWith('/.git/HEAD')) {
-    url = url.replace(/\/$/, '') + '/.git/HEAD';
-  }
-  if (!state.gitdumpFindings.includes(url)) state.gitdumpFindings.push(url);
-  renderGitDumpFindings();
-  selectGitDumpTarget(url);
-  input.value = '';
-}
-
-// ─── Render the findings list ──────────────────────────────
-function renderGitDumpFindings() {
-  const list = document.getElementById('gitdump-findings-list');
-  const empty = document.getElementById('gitdump-no-findings');
-  if (!list) return;
-  list.innerHTML = '';
-
-  if (!state.gitdumpFindings.length) {
-    if (empty) empty.style.display = 'flex';
+  const url = input ? input.value.trim() : '';
+  if (!url || !url.endsWith('/.git/HEAD')) {
+    toast('URL must end with /.git/HEAD (e.g. https://target.com/.git/HEAD)', true);
     return;
   }
-  if (empty) empty.style.display = 'none';
-
-  state.gitdumpFindings.forEach(url => {
-    const selected = state.gitdumpSelected === url;
-    const row = document.createElement('div');
-    row.className = 'gitdump-finding-row' + (selected ? ' selected' : '');
-    const urlSpan = document.createElement('span');
-    urlSpan.className = 'gitdump-finding-url';
-    urlSpan.textContent = url;
-    const btn = document.createElement('button');
-    btn.className = 'btn-secondary btn-secondary--red btn-primary--small';
-    btn.textContent = selected ? '✓ Selected' : 'Select';
-    btn.onclick = () => selectGitDumpTarget(url);
-    row.appendChild(urlSpan);
-    row.appendChild(btn);
-    list.appendChild(row);
-  });
-}
-
-// ─── Select a target + fetch a preview of the command ──────
-function selectGitDumpTarget(url) {
-  state.gitdumpSelected = url;
-  document.getElementById('gitdump-target-display').textContent = url;
-  document.getElementById('gitdump-confirm-card').style.display = 'block';
-  const cb = document.getElementById('gitdump-authorized-checkbox');
-  if (cb) cb.checked = false;
-  document.getElementById('start-gitdump-btn').disabled = true;
-  renderGitDumpFindings();
-  previewGitDumpCommand();
-}
-
-function previewGitDumpCommand() {
-  if (!state.gitdumpSelected) return;
-  const label = document.getElementById('gitdump-label-input').value.trim();
-  fetch('/api/gitdump/preview', {
-    method: 'POST',
-    headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({ git_head_url: state.gitdumpSelected, label }),
-  })
-    .then(r => r.json())
-    .then(data => {
-      if (data.error) { toast(data.error, true); return; }
-      document.getElementById('gitdump-command-preview').textContent = data.command;
-      document.getElementById('gitdump-path-preview').textContent = data.dump_path;
-      document.getElementById('gitdump-venv-hint').textContent = data.venv_hint || '';
-    })
-    .catch(() => {});
-}
-
-function onGitDumpAuthChange() {
-  const checked = document.getElementById('gitdump-authorized-checkbox').checked;
-  document.getElementById('start-gitdump-btn').disabled = !checked || !state.gitdumpSelected;
-}
-
-// ─── Check whether the git-dumper binary is available ──────
-function checkGitDumperAvailability() {
-  fetch('/api/gitdump/check')
-    .then(r => r.json())
-    .then(data => {
-      const banner = document.getElementById('gitdump-availability-banner');
-      if (!banner) return;
-      if (data.available) {
-        banner.style.display = 'none';
-      } else {
-        banner.textContent = `⚠ git-dumper not found in the venv or on PATH. Install it first: source venv/bin/activate && pip install git-dumper`;
-        banner.style.display = 'flex';
-      }
-    })
-    .catch(() => {});
-}
-
-// ─── Start the dump ──────────────────────────────────────
-function startGitDump() {
-  if (!state.gitdumpSelected) { toast('Select a finding first', true); return; }
-  const authorized = document.getElementById('gitdump-authorized-checkbox').checked;
-  if (!authorized) { toast('Please confirm authorization before dumping.', true); return; }
-  if (state.gitdumpJob && state.gitdumpJob.status === 'running') {
-    toast('A dump is already running', true); return;
+  if (!state.gitdumpFindings.includes(url)) {
+    state.gitdumpFindings.push(url);
   }
+  selectGitDumpTarget(url);
+  if (input) input.value = '';
+  toast(`Target added: ${url}`);
+}
 
-  const label = document.getElementById('gitdump-label-input').value.trim();
+function toggleGitDumpBtn() {
+  const cb = document.getElementById('gitdump-authorized-checkbox');
+  const btn = document.getElementById('start-gitdump-btn');
+  if (btn && cb) btn.disabled = !cb.checked;
+}
 
-  clearTerminal('gitdump-terminal');
-  document.getElementById('gitdump-terminal-card').style.display = 'block';
-  document.getElementById('gitdump-stats-row').style.display = 'grid';
-  document.getElementById('gitdump-results-card').style.display = 'none';
-  document.getElementById('gitdump-stat-files').textContent = '0';
-  document.getElementById('gitdump-stat-elapsed').textContent = '0s';
-  document.getElementById('gitdump-badge').textContent = 'RUNNING';
-  document.getElementById('gitdump-badge').className = 'module-badge module-badge--running';
-  document.getElementById('start-gitdump-btn').disabled = true;
-  document.getElementById('stop-gitdump-btn').style.display = 'flex';
-
-  startElapsed('gitdumpElapsedTimer', 'gitdump-stat-elapsed');
-  termAppend('gitdump-terminal', `[*] Target: ${state.gitdumpSelected}`);
-
+function startGitDump() {
+  if (!state.gitdumpSelected) {
+    toast('Please select or add a /.git/HEAD target first.', true);
+    return;
+  }
+  const cb = document.getElementById('gitdump-authorized-checkbox');
+  if (!cb || !cb.checked) {
+    toast('You must confirm legal authorization first.', true);
+    return;
+  }
   fetch('/api/gitdump/start', {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({ git_head_url: state.gitdumpSelected, label, authorized: true }),
+    body: JSON.stringify({ git_head_url: state.gitdumpSelected, authorized: true }),
   })
     .then(r => r.json())
     .then(data => {
-      if (data.error) { toast(data.error, true); resetGitDumpBtn(); return; }
-      state.gitdumpJob = { id: data.job_id, label: data.label, status: 'running' };
-      streamGitDumpJob(data.job_id);
-      refreshHistory();
-    })
-    .catch(e => { toast('Failed to start dump: ' + e.message, true); resetGitDumpBtn(); });
-}
-
-function resetGitDumpBtn() {
-  const cb = document.getElementById('gitdump-authorized-checkbox');
-  document.getElementById('start-gitdump-btn').disabled = !(cb && cb.checked) || !state.gitdumpSelected;
-  document.getElementById('stop-gitdump-btn').style.display = 'none';
-  document.getElementById('gitdump-badge').textContent = 'READY';
-  document.getElementById('gitdump-badge').className = 'module-badge';
-  stopElapsed('gitdumpElapsedTimer');
-}
-
-// ─── SSE Stream for Git-Dumper ─────────────────────────────
-function streamGitDumpJob(jobId) {
-  const sse = new EventSource(`/api/jobs/${jobId}/stream`);
-  let fileCount = 0;
-
-  sse.onmessage = (e) => {
-    const data = JSON.parse(e.data);
-
-    if (data.error) { termAppend('gitdump-terminal', '[ERROR] ' + data.error); sse.close(); return; }
-
-    if (data.line) {
-      termAppend('gitdump-terminal', data.line);
-      if (/^\[?Fetching /i.test(data.line) || data.line.includes('.git/objects/')) {
-        fileCount++;
-        document.getElementById('gitdump-stat-files').textContent = fileCount;
-      }
-    }
-
-    if (data.done) {
-      removeCursor('gitdump-terminal');
-      sse.close();
-      stopElapsed('gitdumpElapsedTimer');
-      state.gitdumpJob.status = data.status;
-
-      if (data.status === 'completed') {
-        document.getElementById('gitdump-badge').textContent = 'DONE';
-        document.getElementById('gitdump-badge').className = 'module-badge module-badge--done';
-        loadGitDumpResults(data.result);
+      if (data.error) {
+        toast(data.error, true);
       } else {
-        document.getElementById('gitdump-badge').textContent = data.status === 'stopped' ? 'STOPPED' : 'FAILED';
-        document.getElementById('gitdump-badge').className = 'module-badge module-badge--failed';
-        if (data.status !== 'stopped') toast('Dump failed. Check terminal output.', true);
+        toast(`Git extraction job started for ${data.label}`);
+        switchTab('recon');
+        clearTerminal();
+        termAppend(`[*] Starting git-dumper extraction for: ${data.target}`);
+        const sse = new EventSource(`/api/jobs/${data.job_id}/stream`);
+        state.currentJob = { id: data.job_id, domain: data.label, sse };
+        sse.onmessage = e => {
+          const d = JSON.parse(e.data);
+          if (d.line) termAppend(d.line);
+          if (d.done) {
+            sse.close();
+            resetUI();
+          }
+        };
+        sse.onerror = () => {
+          sse.close();
+          resetUI();
+        };
       }
-      document.getElementById('start-gitdump-btn').disabled = false;
-      document.getElementById('stop-gitdump-btn').style.display = 'none';
-      refreshHistory();
-    }
-  };
-
-  sse.onerror = () => {
-    termAppend('gitdump-terminal', '[ERROR] Connection to server lost.');
-    sse.close();
-    resetGitDumpBtn();
-  };
-}
-
-function loadGitDumpResults(result) {
-  if (!result) return;
-  document.getElementById('gitdump-stat-files').textContent = result.file_count || 0;
-  document.getElementById('gitdump-results-card').style.display = 'block';
-  document.getElementById('gitdump-result-path').textContent = result.dump_path || '—';
-  document.getElementById('gitdump-result-target').textContent = result.target || '—';
-  document.getElementById('gitdump-result-count').textContent = result.file_count || 0;
-
-  toast(result.file_count > 0
-    ? `✓ Dump complete — ${result.file_count} files saved`
-    : '⚠ Dump finished but no files retrieved');
-}
-
-function copyGitDumpPath() {
-  const path = document.getElementById('gitdump-result-path').textContent;
-  if (!path || path === '—') return;
-  navigator.clipboard.writeText(path).then(() => toast('Path copied ✓')).catch(() => {});
-}
-
-// ─── Init: extend state + wire up the panel's inputs ───────
-document.addEventListener('DOMContentLoaded', () => {
-  state.gitdumpJob = null;
-  state.gitdumpFindings = [];
-  state.gitdumpSelected = null;
-  state.gitdumpElapsedTimer = null;
-
-  const authCb = document.getElementById('gitdump-authorized-checkbox');
-  if (authCb) authCb.addEventListener('change', onGitDumpAuthChange);
-
-  const labelInput = document.getElementById('gitdump-label-input');
-  if (labelInput) labelInput.addEventListener('input', () => previewGitDumpCommand());
-
-  const customInput = document.getElementById('gitdump-custom-url');
-  if (customInput) {
-    customInput.addEventListener('keydown', e => {
-      if (e.key === 'Enter') addCustomGitDumpTarget();
-    });
-  }
-
-  renderGitDumpFindings();
-});
-
-// ─── Patch: history item restore for gitdump type ──────────
-const _origLoadHistoryItem2 = window.loadHistoryItem;
-window.loadHistoryItem = function(jobId, type) {
-  if (type !== 'gitdump') { _origLoadHistoryItem2(jobId, type); return; }
-
-  toast('Loading dump results...');
-  fetch(`/api/jobs/${jobId}/status`)
-    .then(r => r.json())
-    .then(job => {
-      if (job.error) { toast('Could not load job', true); return; }
-      switchTab('gitdump');
-
-      const result = job.result || {};
-      document.getElementById('gitdump-stats-row').style.display = 'grid';
-      document.getElementById('gitdump-stat-files').textContent = result.file_count || 0;
-      document.getElementById('gitdump-stat-elapsed').textContent = '—';
-      document.getElementById('gitdump-badge').textContent = 'DONE';
-      document.getElementById('gitdump-badge').className = 'module-badge module-badge--done';
-      document.getElementById('gitdump-terminal-card').style.display = 'none';
-      loadGitDumpResults(result);
-
-      document.getElementById('history-panel').classList.remove('open');
     })
-    .catch(e => toast('Failed: ' + e.message, true));
-};
+    .catch(err => toast(err.message, true));
+}
 
-// ─── Patch: refreshHistory to label gitdump entries properly ──
-window.refreshHistory = function() {
+function refreshSessionDropdown() {
+  const sel = document.getElementById('session-select');
+  if (!sel) return;
   fetch('/api/sessions')
     .then(r => r.json())
     .then(sessions => {
-      const list = document.getElementById('history-list');
-      if (!sessions.length) {
-        list.innerHTML = '<div class="history-empty">No scans yet</div>';
-        return;
-      }
-      list.innerHTML = sessions.map(s => {
-        const dt = new Date(s.created_at).toLocaleString();
-        const meta = s.type === 'subdomain'
-          ? `Alive: ${s.result_summary?.alive_count ?? '—'}`
-          : s.type === 'gitdump'
-          ? `Dump: ${s.status === 'completed' ? 'done' : s.status}`
-          : `Findings: ${s.result_summary?.total_findings ?? '—'}`;
-        const statusColor = s.status === 'completed' ? 'var(--green)' : s.status === 'failed' ? 'var(--red)' : 'var(--cyan)';
-        const canLoad    = s.status === 'completed';
-        const canJump    = s.status === 'running';
-        const isClickable = canLoad || canJump;
-
-        const ctaText = canLoad ? 'Click to view results →'
-                      : canJump ? 'Click to view live scan →'
-                      : '';
-
-        const onclickAttr = canLoad ? `onclick="loadHistoryItem('${s.id}','${s.type}')"`
-                          : canJump ? `onclick="jumpToRunning('${s.type}')"`
-                          : '';
-
-        const typeLabel = s.type === 'subdomain' ? '◈ SUBDOMAIN'
-                         : s.type === 'commondir' ? '◈ COMMON DIR'
-                         : s.type === 'gitdump'   ? '⎋ GIT-DUMPER'
-                         : '◉ DIR SCAN';
-
-        return `<div class="history-item${isClickable ? ' history-item--clickable' : ''}" ${onclickAttr}>
-          <div class="history-item-top">
-            <div class="history-item-type">${typeLabel}</div>
-            <div class="history-item-status" style="color:${statusColor}">${s.status.toUpperCase()}</div>
-          </div>
-          <div class="history-item-domain">${s.domain}</div>
-          <div class="history-item-meta">${meta} · ${dt}</div>
-          ${isClickable ? `<div class="history-item-cta">${ctaText}</div>` : ''}
-        </div>`;
-      }).join('');
+      if (!Array.isArray(sessions)) return;
+      const completed = sessions.filter(s => s.status === 'completed');
+      sel.innerHTML =
+        '<option value="">-- Load Past Scan (' + completed.length + ') --</option>' +
+        completed
+          .map(
+            s =>
+              `<option value="${escapeHtml(s.id)}">${escapeHtml(s.domain)} [${escapeHtml((s.type || 'full').toUpperCase())}]</option>`
+          )
+          .join('');
     })
     .catch(() => {});
-};
+}
 
-// ─── Patch: jumpToRunning to support gitdump ───────────────
-const _origJumpToRunning = jumpToRunning;
-window.jumpToRunning = function(type) {
-  if (type !== 'gitdump') { _origJumpToRunning(type); return; }
-  switchTab('gitdump');
-  document.getElementById('gitdump-terminal-card').style.display = 'block';
-  document.getElementById('history-panel').classList.remove('open');
-};
+function loadSavedSession(jobId) {
+  if (!jobId) return;
+  fetch(`/api/jobs/${jobId}/status`)
+    .then(r => r.json())
+    .then(job => {
+      if (job.error || !job.result) {
+        toast('Could not load saved session.', true);
+        return;
+      }
+      state.currentJob = { id: job.id, domain: job.domain };
+      state.reconResults = job.result;
+      const domIn = document.getElementById('domain-input');
+      if (domIn && job.domain) domIn.value = job.domain;
+      clearTerminal();
+      termAppend(`[+] Loaded saved scan session for: ${job.domain} (${job.created_at || ''})`);
+      updateStepper(6, `Loaded Session — ${job.domain}`, 100);
+      renderAll(job.result);
+      document.getElementById('export-bar').classList.remove('hidden');
+      toast(`Loaded scan results for ${job.domain}`);
+    })
+    .catch(err => toast(err.message, true));
+}
+
+document.addEventListener('DOMContentLoaded', () => {
+  renderGitDumpFindings();
+  refreshSessionDropdown();
+  const domIn = document.getElementById('domain-input');
+  if (domIn) {
+    domIn.addEventListener('keydown', e => {
+      if (e.key === 'Enter') startScan('full');
+    });
+  }
+  const gitIn = document.getElementById('gitdump-custom-url');
+  if (gitIn) {
+    gitIn.addEventListener('keydown', e => {
+      if (e.key === 'Enter') addCustomGitDumpTarget();
+    });
+  }
+});

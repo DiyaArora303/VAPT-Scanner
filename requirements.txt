@@ -1,2 +1,8 @@
-flask
-flask-cors
+# VAPT Universal Reconnaissance Suite — Python dependencies
+# Compatible with Python 3.11 - 3.13 on Windows, Linux, macOS.
+
+flask>=3.0,<4
+flask-cors>=4.0,<7
+requests>=2.31,<3
+beautifulsoup4>=4.12,<5
+dnspython>=2.6,<3

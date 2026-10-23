@@ -9,8 +9,11 @@ __pycache__/
 dist/
 build/
 
-# Scan results (contains target data — don't commit)
+# Scan results & diagnostic outputs (contains target data — don't commit)
 results/
+diagnostic_results/
+_diagnose_console.txt
+_diagnostics_report.json
 
 # Environment / secrets
 .env
