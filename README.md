@@ -298,8 +298,8 @@ The repository includes an automated launcher (`start.bat`) that automatically d
 
 ```cmd
 # 1. Clone the repository
-git clone https://github.com/DiyaArora303/VAPT-Recon-Suite.git
-cd VAPT-Recon-Suite
+git clone https://github.com/DiyaArora303/VAPT-Scanner.git
+cd VAPT-Scanner
 
 # 2. Launch using start.bat
 start.bat
@@ -325,8 +325,8 @@ python app.py
 
 ```bash
 # 1. Clone the repository
-git clone https://github.com/DiyaArora303/VAPT-Recon-Suite.git
-cd VAPT-Recon-Suite
+git clone https://github.com/DiyaArora303/VAPT-Scanner.git
+cd VAPT-Scanner
 
 # 2. Make scripts executable
 chmod +x start.sh scripts/*.sh
